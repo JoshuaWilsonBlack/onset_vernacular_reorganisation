@@ -1,0 +1,4241 @@
+---
+title: "SM2: Modelling"
+author: '[Anonymised]'
+date: today
+lightbox: auto
+format:
+  html:
+    theme: flatly
+    toc: true
+    toc-depth: 3
+    toc-location: right
+    code-summary: "To view the code click here"
+    anchor-sections: true
+    number-sections: true
+    cap-location: margin
+    title-block-banner: true
+    fig-responsive: true
+    lang: 'en-GB'
+    execute:
+      warning: false
+      cache: true
+bibliography: 
+  - "https://api.citedrive.com/bib/1e7eade6-e5e0-4cea-96b3-27a813f7bd4a/references.bib?x=eyJpZCI6ICIxZTdlYWRlNi1lNWUwLTRjZWEtOTZiMy0yN2E4MTNmN2JkNGEiLCAidXNlciI6ICI0NzAyIiwgInNpZ25hdHVyZSI6ICJkOWIxODViNzJiOWNmNDQ1ZWVjMGU4NzNhMzM4ODg2NWUyYTQ3MzgzMDQ3ZjIxZWIwZDUxNTBkYThkMzE1M2VkIn0=/bibliography.bib"
+  - ../grateful-refs.bib
+editor:
+  markdown:
+    wrap: 72
+editor_options: 
+  chunk_output_type: inline
+---
+
+# Overview
+
+This markdown sets out our modelling steps for both the preschoolers' and
+QuakeBox corpora. Since the _onset_ of vernacular reorganisation is what we are
+interested in, it is important that we fit smooth models. 
+
+Note that this document includes both models _with word frequency_ and 
+models _without word frequency_. We fit both, but discuss those without word
+frequency in the paper.
+
+::: {.callout-note}
+
+The `rstan` package requires the C++ Toolchain to be installed and configured.
+This enables R to compile C++ code. For the current instructions, go to
+<https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started>. This is 
+typically done by installing RTools (follow the link on the page).
+
+:::
+
+# Libraries and data
+
+```{r}
+# Tidyverse and friends
+library(tidyverse)
+library(lubridate)
+library(modelr)
+library(ggforce)
+library(ggrepel)
+library(scico)
+
+# File path management
+library(here)
+
+# NZILBB packages for interaction with LaBB-CAT and modifying vocalic data.
+library(nzilbb.vowels)
+library(nzilbb.labbcat)
+
+# Libraries for Bayesian modelling
+library(brms)
+library(tidybayes)
+library(bayesplot)
+library(ggdist)
+
+# GAMM libraries for QuakeBox data
+library(mgcv)
+library(itsadug)
+
+# Nice tables.
+library(kableExtra)
+
+# secr provides the pointsInPolygon function for plotting interaction.
+library(secr)
+
+# Set ggplot theme
+theme_set(theme_bw())
+bayesplot_theme_set(theme_bw())
+
+labbcat.url <- 'https://labbcat.canterbury.ac.nz/kids/'
+
+# Set colours for vowel plots
+# These are derived from Tol's rainbow palette, designed
+# to be maximally readable for various forms of colour
+# blindness (https://personal.sron.nl/~pault/).
+# Set colours for vowel plots
+# These are derived from Tol's rainbow palette, designed
+# to be maximally readable for various forms of colour
+# blindness (https://personal.sron.nl/~pault/).
+vowel_colours_11 <- c(
+  DRESS = "#777777",
+  FLEECE = "#882E72",
+  GOOSE = "#4EB265",
+  KIT = "#7BAFDE",
+  LOT = "#DC050C",
+  TRAP = "#F7F056",
+  START = "#1965B0",
+  STRUT = "#F4A736",
+  THOUGHT = "#72190E",
+  NURSE = "#E8601C",
+  FOOT = "#5289C7"
+)
+
+vowel_colours_5 <- c(
+  DRESS = "#777777",
+  FLEECE = '#4477AA',
+  TRAP = '#228833',
+  NURSE = '#EE6677',
+  KIT = '#CCBB44'
+)
+```
+
+```{r}
+vowels <- read_rds(here('data', 'processed_vowels.rds'))
+```
+
+
+# Data exploration and split
+
+We will divide the data four ways. To decide whether there are frequency effects
+we fit models with and without frequency terms using the data in which frequency
+appears (the model comparison approach which we use requires that the models are
+fit on the same data!)
+
+Are there any words we can deal with in terms of missing frequency information?
+```{r}
+# Create variable to select only NZE short front vowels.
+short_front <- c(
+  "DRESS", "KIT", "TRAP", "FLEECE", "NURSE"
+)
+
+vowels |>
+  filter(
+    is.na(childes_count),
+    vowel %in% short_front
+  ) |>
+  count(word, vowel) |>
+  arrange(desc(n))
+```
+
+
+We will also split the data into two, one for our F1 models and the other
+for our F2 models. This allows us to separately filter
+F1 and F2 outliers with the relevant columns in the data (`F1_outlier` and
+`F2_outlier`).
+
+```{r}
+vowels$age |> hist()
+```
+
+We only model the data between 47 months and 63 months, which covers the 
+vast majority of our data. This removes the following participant:
+```{r}
+vowels |> 
+  filter(
+    age < 47 | age > 63,
+    vowel %in% short_front
+  ) |> 
+  group_by(participant) |> 
+  summarise(
+    age = first(age),
+    collect = first(collect),
+    tokens = n(),
+    ethnicity = first(ethnicity),
+    gender = first(gender)
+  )
+```
+
+
+We also scale variables to aid model fit.
+
+```{r}
+vowels <- vowels |>
+  filter(
+    between(age, 47, 63),
+    vowel %in% short_front,
+    !is.na(F1_lob2),
+    !is.na(F2_lob2)
+  ) |>
+  mutate(
+    age_s = scale(age),
+    log_childes_s = scale(log(childes_count))
+  )
+
+# Create dataframe for F1 models
+f1 <- vowels |>
+  filter(!F1_outlier) |> 
+  select(
+    participant, collect, age_s, gender, word, vowel, stressed, stopword, 
+    F1_lob2, log_childes_s, age
+  ) |> 
+  mutate(
+    gender = as.factor(gender),
+    word = as.factor(word)
+  )
+
+# Create dataframe for F2 models
+f2 <- vowels |>
+  filter(!F2_outlier) |> 
+  select(
+    participant, collect, age_s, gender, word, vowel, stressed, stopword, 
+    F2_lob2, log_childes_s, age
+  ) |> 
+  mutate(
+    gender = as.factor(gender),
+    word = as.factor(word)
+  )
+```
+
+We now plot mean vowel spaces.
+
+```{r}
+vowel_summary <- vowels |> 
+  group_by(vowel) |> 
+  filter(
+    stressed
+  ) |> 
+  summarise(
+    mean_f1 = mean(F1_lob2),
+    mean_f2 = mean(F2_lob2)
+  )
+  
+mean_plot <- vowels |>
+  ggplot(
+    aes(
+      x = F2_lob2,
+      y = F1_lob2,
+      colour = vowel,
+      label = vowel
+    )
+  ) + 
+  stat_ellipse(level=0.68, linewidth=1) +
+  geom_point(data = vowel_summary, aes(x=mean_f2, y=mean_f1)) +
+  geom_label_repel(
+    mapping = aes(x=mean_f2, y=mean_f1),
+    min.segment.length = 0, seed = 42,
+    show.legend = FALSE,
+    fontface = "bold",
+    size = 10 / .pt,
+    label.padding = unit(0.2, "lines"),
+    force = 2,
+    max.overlaps = Inf,
+    data = vowel_summary
+  ) +
+  scale_x_reverse(limits = c(3, -1)) +
+  scale_y_reverse(limits = c(3, -2)) +
+  scale_colour_manual(values = vowel_colours_5) +
+  theme(
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Preschool",
+    x = "First formant (normalized)",
+    y = "Second formant (normalized)"
+  )
+
+mean_plot
+```
+
+In order to interpret this, it is worth looking at adults from the same 
+community on the same scale.
+
+```{r}
+QB1 <- read_rds(here('data', 'QB1.rds'))
+
+QB1 <- QB1 |> 
+  filter(
+    vowel %in% short_front,
+    !unstressed
+  )
+```
+
+```{r}
+QB1_summary <- QB1 |> 
+  group_by(vowel) |> 
+  summarise(
+    mean_f1 = mean(F1_lob2),
+    mean_f2 = mean(F2_lob2)
+  )
+  
+QB1_mean_plot <- QB1 |>
+  ggplot(
+    aes(
+      x = F2_lob2,
+      y = F1_lob2,
+      colour = vowel,
+      label = vowel
+    )
+  ) + 
+  stat_ellipse(level=0.68, linewidth=1) +
+  geom_point(data = QB1_summary, aes(x=mean_f2, y=mean_f1)) +
+  geom_label_repel(
+    mapping = aes(x=mean_f2, y=mean_f1),
+    min.segment.length = 0, seed = 42,
+    show.legend = FALSE,
+    fontface = "bold",
+    size = 10 / .pt,
+    max.overlaps = Inf,
+    force = 2,
+    label.padding = unit(0.2, "lines"),
+    data = QB1_summary
+  ) +
+  scale_x_reverse(limits = c(3, -1)) +
+  scale_y_reverse(limits = c(3, -2)) +
+  scale_colour_manual(values = vowel_colours_5) +
+  theme(
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Community (QuakeBox)",
+    x = "First formant (normalized)",
+    y = "Second formant (normalized)"
+  )
+
+QB1_mean_plot
+```
+
+We now combine these into a single plot.
+
+```{r}
+#| fig-cap: "Overall vowel spaces for NZE short front vowels in preschoolers (left) and adults (right). Ellipses are at 1 standard deviation."
+#| label: fig-vs
+combined_raw_plot <- (mean_plot + theme(legend.position = "none")) +
+  QB1_mean_plot
+
+ggsave(
+  here('plots', 'normalised_vowel_spaces.tiff'),
+  plot = combined_raw_plot,
+  width = 7,
+  height = 5,
+  dpi = 500
+)
+
+combined_raw_plot
+```
+
+The most obvious feature of @fig-vs is that the kids have much more variability
+in their production in normalised space. The second thing to note is the
+higher and fronter position of [dress]{.smallcaps} in the preschool data along
+with the lower and backer [trap]{.smallcaps}. The position of [nurse]{.smallcaps}
+is also quite different in the two populations.
+
+# Kids smooth models
+
+## Modelling strategy
+
+We will be fitting Bayesian GAMMs. The rationale for this is discussed in
+the paper. Our primary motivation is the increased control over model 
+convergence which Bayesian methods allow. This comes, in part, from the
+capacity to set informative priors and to specify the underlying probabilistic
+model we assume.
+
+First, consider our interest in word frequency and whether this is implicated in
+any change over time. Our measure of word frequency is imperfect and we do not
+have it for all words in our dataset. In order to deal with this we fit a
+maximal model with frequency _and_ a model without frequency for each of F1 and
+F2 and for each of the vowels we are interested in.
+
+Our model including frequency fits an interaction between age and frequency.
+
+```
+F1_lob2 ~ gender + stopword + 
+    t2(age_s, log_childes_s, by=gender, k = 5) +
+    (1 | word/stressed) +
+    (1 | participant/collect))
+```
+
+Here we use a `t2` interaction term, fiting distinct smooths for male and 
+female speakers.
+
+Any effect of interest to us is not one which rapidly goes up and down in the F1
+space as age increases. Rather, we want to be able to get small bends in the
+curve. So we reduce k to 5. This is already a complex model given the number
+of data points we have.
+
+Our model without frequency is the following:
+```
+F1_lob2 ~ gender + stopword + 
+    s(age_s, by=gender, k = 5) +
+    (1 | word/stressed) +
+    (1 | participant/collect))
+
+```
+
+It is worth considering the distributions of the normalised formant readings.
+
+```{r}
+#| fig-cap: "Distribution of normalised formant readings for each vowel and formant."
+#| label: fig-resp-dist
+vowels |> 
+  pivot_longer(
+    cols = c("F1_lob2", "F2_lob2"),
+    names_to = "formant_type",
+    values_to = "formant_value"
+  ) |> 
+  filter(
+    !(formant_type == "F1_lob2" & F1_outlier),
+    !(formant_type == "F2_lob2" & F2_outlier)
+  ) |> 
+  ggplot(
+    aes(
+      x = formant_value
+    )
+  ) +
+  geom_freqpoly(stat="density", linewidth=1) +
+  facet_grid(
+    cols = vars(formant_type),
+    rows = vars(vowel)
+  )
+```
+
+@fig-resp-dist suggests that we might want to be able to model skew in our 
+data. The F1 distributions tend to have a strong right skew, and vice versa
+for F2.
+
+We can model this by using a skew normal distribution for our response
+variable. 
+
+```{r}
+#| fig-cap: "Skew normal distributions centred one 0, with variance parameter at 1, and skew parameters ranging from -12 to 12."
+#| label: fig-skew-test
+skew_normal_test <- tibble(
+  alpha = seq(-12, 12, 1)
+)
+
+skew_normal_test <- skew_normal_test |> 
+  mutate(
+    data = map(alpha, ~ rskew_normal(n = 1000, mu = 0, sigma = 1, alpha = .x))
+  ) |> 
+  unnest(data)
+
+skew_normal_test |> 
+  ggplot(
+    aes(
+      x = data
+    )
+  ) +
+  geom_freqpoly(bins=30, stat="density", linewidth=1) +
+  facet_wrap(
+    vars(alpha)
+  )
+```
+@fig-skew-test gives a sense of the range of skewness which can be captured at
+different levels of the skewness parameter.
+
+We now fit models to each vowel. There is a lot of repetition in code. We use
+the tabs below to organise the models. There is a distinct tab for each 
+vowel.
+
+## By-vowel
+
+::: {.panel-tabset}
+
+### Prior predictive check
+
+We begin by sampling from our prior distribution to ensure that we are producing
+values in the ballpark of plausible values for our data. We'll fit this using
+the data for [dress]{.smallcaps}. This is for coding convenience, as the model
+is not learning from the data. What we are doing here is ensuring that we are
+not unduly biasing the model towards a particular result.
+
+```{r}
+dress_f1_data <- f1 |> 
+  filter(
+    vowel == "DRESS"
+  ) |> 
+  droplevels()
+
+
+summary(dress_f1_data)
+```
+
+```{r}
+#| eval: false
+dress_f1_freq_prior_sn <- brm(
+    F1_lob2 ~ gender + stopword + 
+      t2(age_s, log_childes_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = dress_f1_data |> 
+      drop_na(),
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 2000,
+    control = list(adapt_delta = 0.999),
+    sample_prior = "only"
+  )
+
+write_rds(
+  dress_f1_freq_prior_sn, 
+  here('models', 'dress_f1_freq_prior_sn.rds'), 
+  compress = "gz"
+)
+```
+
+We load the previously fit model.
+
+```{r}
+#| include: false
+dress_f1_freq_prior_sn <- read_rds(
+  here('models', 'dress_f1_freq_prior_sn.rds')
+)
+```
+
+We take 100 draws from the prior.
+
+```{r}
+prior_draws <- posterior_predict(dress_f1_freq_prior_sn, ndraws = 100)
+prior_draws <- prior_draws |> 
+  t() |> 
+  as_tibble(.name_repair='unique') |> 
+  bind_cols(dress_f1_data |> drop_na()) |> 
+  pivot_longer(
+    cols = contains('...'),
+    names_to = "draw_index",
+    values_to = "draw_value"
+  ) |> 
+  mutate(
+    draw_index = as.numeric(str_replace(draw_index, "...", ""))
+  )
+```
+
+We plot the values given for a series of age and frequency values.
+``` {r}
+prior_draws |> 
+  ggplot(
+    aes(
+      x = age_s,
+      y = draw_value
+    )
+  ) +
+  geom_jitter(
+    aes(
+      colour = log_childes_s,
+    ),
+    alpha = 0.1
+  ) +
+  geom_smooth() +
+  labs(
+    title = "100 draws from the prior predictive distribution"
+  )
+```
+
+There are quite a few extreme outliers, but the vast majority of the density
+of the prior distribution is in reasonable places.
+
+We now do the same for the model without word frequency.
+
+```{r}
+#| eval: false
+dress_f1_prior_sn <- brm(
+    F1_lob2 ~ gender + stopword + 
+      s(age_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = dress_f1_data,
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 2000,
+    control = list(adapt_delta = 0.999),
+    sample_prior = "only"
+  )
+
+write_rds(
+  dress_f1_prior_sn, 
+  here('models', 'dress_f1_prior_sn.rds'), 
+  compress = "gz"
+)
+```
+
+```{r}
+#| include: false
+dress_f1_prior_sn <- read_rds(here('models', 'dress_f1_prior_sn.rds'))
+```
+
+As above, we take 100 draws from the prior.
+
+```{r}
+prior_draws <- posterior_predict(dress_f1_prior_sn, ndraws = 100)
+prior_draws <- prior_draws |> 
+  t() |> 
+  as_tibble(.name_repair='unique') |> 
+  bind_cols(dress_f1_data) |> 
+  pivot_longer(
+    cols = contains('...'),
+    names_to = "draw_index",
+    values_to = "draw_value"
+  ) |> 
+  mutate(
+    draw_index = as.numeric(str_replace(draw_index, "...", ""))
+  )
+```
+
+We plot the values given for a series of age and frequency values.
+``` {r}
+prior_draws |> 
+  ggplot(
+    aes(
+      x = age_s,
+      y = draw_value
+    )
+  ) +
+  geom_jitter(alpha = 0.1) +
+  geom_smooth() +
+  labs(
+    title = "100 draws from the prior predictive distribution (no frequency)"
+  )
+```
+Again, this is fine. If anything we're not being informative enough.
+
+### [dress]{.smallcaps} {.panel-tabset}
+
+#### F1
+
+We repeat the code to extract the [dress]{.smallcaps} data so that this tab
+matches the tabs for the other vowels (it is repeated from the prior predictive
+check).
+
+```{r}
+dress_f1_data <- f1 |> 
+  filter(
+    vowel == "DRESS"
+  ) |> 
+  droplevels()
+
+
+summary(dress_f1_data)
+```
+
+Unsurprisingly, the majority of the words here are stop words. 
+In fact, 480 tokens of 940 are the word 'then'.
+
+We first fit the model with word frequency.
+
+```{r}
+#| eval: false
+dress_f1_freq <- brm(
+    F1_lob2 ~ gender + stopword + 
+      t2(age_s, log_childes_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = dress_f1_data |> 
+      drop_na(),
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 4000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(
+  dress_f1_freq, 
+  here('models', 'dress_f1_freq_sn.rds'), 
+  compress = "gz"
+)
+```
+
+```{r}
+dress_f1_freq <- read_rds(here('models', 'dress_f1_freq_sn.rds'))
+```
+
+Look at the model summary to ensure that there are no problems with the fit.
+
+```{r}
+summary(dress_f1_freq)
+```
+
+We can check the fit of the model by means of posterior predictive checks. We
+compare the results expected given the model with the actual data.
+
+```{r}
+pp_check(dress_f1_freq, ndraws = 100) +
+  labs(
+    title = "PPD check (DRESS F1)"
+  ) 
+```
+
+We compare by gender. 
+
+```{r}
+pp_check(dress_f1_freq, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (DRESS F1)"
+  )
+```
+
+Whatever is causing the (on-the-way-to) bimodal distribution in our actual data
+is not being captured by the model. However, the skew is being captured
+reasonably well (and better than the other approaches we have tried ---
+including a t-distribution).
+
+```{r}
+pp_check(dress_f1_freq, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (DRESS F1)"
+  )
+```
+
+The model is overestimating the minimum and underestimating the maximum of
+the actual data. But it is in the right ballpark.
+doing this for many models, we will define a function which we can reuse.
+
+``` {r}
+interaction_preds <- function(data, fit, stopword = FALSE) {
+  
+    data_grid <- expand_grid(
+      "age_s" = seq(min(data$age_s), max(data$age_s), 0.1),
+      "gender" = c("F", "M"),
+      "log_childes_s" = seq(
+        min(data$log_childes_s), max(data$log_childes_s), 0.1
+      ),
+      "stopword" = stopword
+    )
+    
+    # We only want to take predictions from areas in which we
+    # actually have data. We'll use the convex hull for each gender.
+    m_hull <- data |> 
+      filter(
+        gender == "M"
+      ) |> 
+      slice(
+        chull(age_s, log_childes_s)
+      )
+
+    f_hull <- data |> 
+      filter(
+        gender == "F"
+      ) |> 
+      slice(
+        chull(age_s, log_childes_s)
+      )
+    
+    # Remove data points from outside the hull. We
+    # will not query the model for any of these points.
+    data_grid <- data_grid |> 
+      filter(
+        (
+          gender == "F" & 
+            pointsInPolygon(
+              data_grid |> 
+                select(age_s, log_childes_s),
+              f_hull |> 
+                select(age_s, log_childes_s)
+            )
+          ) |
+          (
+            gender == "M" &
+              pointsInPolygon(
+                data_grid |> 
+                  select(age_s, log_childes_s),
+                m_hull |> 
+                  select(age_s, log_childes_s)
+              )
+          )
+      )
+    
+    
+    plot_data <- data_grid |> 
+      add_epred_draws(
+        fit, 
+        re_formula = NA, 
+        ndraws=100
+      ) |> 
+      mutate(age = age_s * sd(vowels$age) + mean(vowels$age)) 
+}
+
+interaction_plot <- function(model_preds, data) {
+    model_preds |>
+      median_qi(.epred, age) |> 
+      ggplot(
+        aes(
+          x = age,
+          y = log_childes_s,
+          fill = .epred,
+        )
+      ) +
+      geom_tile(width=1, height = 0.1) +
+      geom_jitter(
+        aes(x=age, y=log_childes_s), 
+        inherit.aes= FALSE, 
+        data = data,
+        size = 0.5
+      ) +
+      scale_fill_scico(palette = "buda") +
+      facet_grid(
+        rows = vars(gender)
+      )
+}
+```
+
+``` {r}
+dress_f1_preds <- interaction_preds(
+    dress_f1_data |> drop_na(),
+    dress_f1_freq
+  )
+
+dress_int <- dress_f1_preds |> 
+  interaction_plot(data=dress_f1_data) +
+  labs(
+    title = "DRESS F1",
+    subtitle = "Word frequency and formant values",
+    fill = "Est. (Lob 2.0)",
+    x = "Age (months)",
+    y = "Scaled log corpus frequency"
+  )
+
+ggsave(
+  here('plots', 'dress_freq.tiff'),
+  plot = dress_int,
+  width = 7,
+  height = 5,
+  dpi = 500
+)
+
+dress_int
+```
+
+At the high frequency level, both male and female speakers show an decrease in
+first formant for dress (i.e. raising in the vowel space). For male speakers
+(bottom panel), there appears to be an *increase* at the low frequency level,
+but this occurs in places in which there is almost no data coverage.
+
+```{r}
+#| eval: false
+dress_f1_fit <- brm(
+    F1_lob2 ~ gender + stopword + 
+      s(age_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = dress_f1_data,
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 3000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(
+  dress_f1_fit, 
+  here('models', 'dress_f1_fit_sn.rds'), 
+  compress = "gz"
+)
+```
+
+```{r}
+dress_f1_fit <- read_rds(here('models', 'dress_f1_fit_sn.rds'))
+```
+
+Let's look at the model summary.
+```{r}
+summary(dress_f1_fit)
+```
+
+
+We apply the same steps as above regarding diagnostic plots.
+
+```{r}
+pp_check(dress_f1_fit, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (DRESS F1)"
+  )
+```
+
+```{r}
+pp_check(dress_f1_fit, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (DRESS F1)"
+  )
+```
+
+This is a similar story to the above. We will not continue to leave these
+comments for the other vowels unless something particularly alarming comes up.
+
+Again, we define a function to plot the smooths.
+
+```{r}
+smooth_preds <- function(data, fit, stop = TRUE) {
+  
+  preds <- expand_grid(
+      "age_s" = seq(min(vowels$age_s), max(vowels$age_s), 0.1),
+      "gender" = c("F", "M")
+    )
+    
+  preds <- preds |> 
+      mutate(
+        stopword = stop,
+        participant = "bob",
+        collect = "today"
+      ) |> 
+      add_epred_draws(
+        fit, 
+        re_formula = NA, 
+        allow_new_levels=TRUE, 
+        ndraws=1000
+      ) |> 
+      mutate(
+        age = age_s * sd(vowels$age) + mean(vowels$age)
+      ) |> 
+      median_qi(.width=0.9)
+}
+
+smooth_plot <- function(model_preds, data) {
+  
+  # Extract mean formant value in order to create a dummy
+  # variable to help with the rug layer in the plot.
+  mean_formant <- data |> pull(contains('_lob2')) |> mean()
+  
+  out_plot <- model_preds |> 
+      ggplot(
+        aes(
+          x = age,
+          y = .epred,
+          ymin = .epred.lower,
+          ymax = .epred.upper,
+          colour = gender
+        )
+      ) +
+      geom_ribbon(alpha=0.5, fill = "grey") +
+      geom_line(linewidth = 2) +
+      geom_rug(
+        aes(
+          x=age,
+          y=dummy,
+          colour = gender
+        ), 
+        sides="b", 
+        data=data |> 
+          mutate(
+            dummy = seq(
+              mean_formant - 0.1, 
+              mean_formant + 0.1, 
+              length.out = nrow(data)
+            )
+          ), 
+        inherit.aes=FALSE, 
+        position="jitter"
+      ) +
+      scale_y_reverse()
+}
+```
+
+And then apply it:
+
+``` {r}
+dress_f1_preds <- smooth_preds(
+    dress_f1_data,
+    dress_f1_fit
+  ) 
+
+dress_smooth <- dress_f1_preds |> 
+  smooth_plot(data = dress_f1_data) + 
+  labs(
+    title = "Model predictions DRESS F1 (no freq)",
+    x = "Age (months)",
+    colour = "Gender"
+  )
+
+dress_smooth
+```
+
+Here, the $y$-axis is flipper, so that a rising line indicates a rising vowel
+in the vowel space. We see that, for the female children, there is a steady 
+rise in the [dress]{.smallcaps}, albeit with very wide error bars.
+
+#### F2
+
+```{r}
+dress_f2_data <- f2 |> 
+  filter(
+    vowel == "DRESS"
+  ) |> 
+  droplevels()
+
+summary(dress_f2_data)
+```
+
+There's some very high outliers here. Let's have a look at a histogram.
+```{r}
+dress_f2_data |> 
+  ggplot(
+    aes(
+      x = F2_lob2
+    )
+  ) +
+  geom_histogram()
+```
+I would have expected these to appear as outliers in the standard deviation 
+based filter. We leave them in, in order to avoid applying a difficult manual
+check to every vowel.
+
+```{r}
+#| eval: false
+dress_f2_freq <- brm(
+    F2_lob2 ~ gender + stopword + 
+      t2(age_s, log_childes_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = dress_f2_data |> 
+      drop_na(),
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 2000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(
+  dress_f2_freq, 
+  here('models', 'dress_f2_freq_sn.rds'), 
+  compress = "gz"
+)
+```
+
+```{r}
+dress_f2_freq <- read_rds(here('models', 'dress_f2_freq_sn.rds'))
+```
+
+```{r}
+pp_check(dress_f2_freq, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (DRESS F2)"
+  )
+```
+
+
+```{r}
+pp_check(dress_f2_freq, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (DRESS F2)"
+  )
+```
+
+
+```{r}
+dress_f2_preds <- interaction_preds(
+    dress_f2_data |> drop_na(),
+    dress_f2_freq
+  )
+
+dress_f2_int <- dress_f2_preds |> 
+  interaction_plot(data=dress_f2_data) +
+  labs(
+    title = "DRESS F2",
+    subtitle = "Word frequency and formant values",
+    fill = "Est. (Lob 2.0)",
+    x = "Age (months)",
+    y = "Scaled log corpus frequency"
+  )
+dress_f2_int
+```
+
+There is no strong change in [dress]{.smallcaps} F2 here for either of the 
+genders in our data.
+
+```{r}
+#| eval: false
+dress_f2_fit <- brm(
+    F2_lob2 ~ gender + stopword + 
+      s(age_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = dress_f2_data,
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 3000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(
+  dress_f2_fit, 
+  here('models', 'dress_f2_fit_sn.rds'), 
+  compress = "gz"
+)
+```
+
+
+```{r}
+dress_f2_fit <- read_rds(here('models', 'dress_f2_fit_sn.rds'))
+```
+
+
+```{r}
+summary(dress_f2_fit)
+```
+
+```{r}
+pp_check(dress_f2_fit, ndraws = 100) +
+  labs(
+    title = "PPD check (DRESS F2)"
+  ) 
+```
+
+
+```{r}
+pp_check(dress_f2_fit, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (DRESS F2)"
+  )
+```
+
+```{r}
+pp_check(dress_f2_fit, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (DRESS F2)"
+  )
+```
+
+We output predictions and plot them.
+```{r}
+dress_f2_nofreq_preds <- smooth_preds(
+    dress_f2_data,
+    dress_f2_fit
+  ) 
+
+dress_f2_smooth <- dress_f2_nofreq_preds |> 
+  smooth_plot(data = dress_f2_data) + 
+  labs(
+    title = "Model predictions DRESS F2 (no freq)",
+    x = "Age (months)",
+    colour = "Gender"
+  )
+
+dress_f2_smooth
+```
+
+Nothing much here.
+
+#### Remove models
+
+Once we are done with plotting the models for a particular vowel, we remove 
+them from the R environment to free up space for the next models.
+
+```{r}
+rm(dress_f1_fit, dress_f1_freq, dress_f2_fit, dress_f2_freq)
+```
+
+
+### [kit]{.smallcaps}
+
+#### F1
+
+```{r}
+kit_f1_data <- f1 |> 
+  filter(
+    vowel == "KIT"
+  ) |> 
+  droplevels() 
+
+
+summary(kit_f1_data)
+```
+
+```{r}
+#| eval: false
+kit_f1_freq <- brm(
+    F1_lob2 ~ gender + stopword + 
+      t2(age_s, log_childes_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = kit_f1_data|> 
+      drop_na(),
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 4000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(
+  kit_f1_freq, 
+  here('models', 'kit_f1_freq_sn.rds'), 
+  compress = "gz"
+)
+```
+
+
+```{r}
+kit_f1_freq <- read_rds(here('models', 'kit_f1_freq_sn.rds'))
+```
+
+
+
+```{r}
+summary(kit_f1_freq)
+```
+
+Note that for this model we get the following warning :
+
+> Warning: Bulk Effective Samples Size (ESS) is too low, indicating posterior means and medians may be unreliable.
+Running the chains for more iterations may help. See
+https://mc-stan.org/misc/warnings.html#bulk-ess
+
+This is a problem for our random effects structure, which struggles due to the
+very high number of groups and very relatively small amount of data. The main
+effects are all well sampled.
+
+```{r}
+pp_check(kit_f1_freq, ndraws = 100) +
+  labs(
+    title = "PPD check (KIT F1)"
+  )
+```
+
+
+```{r}
+pp_check(kit_f1_freq, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (KIT F1)"
+  )
+```
+
+Not bad!
+
+```{r}
+pp_check(kit_f1_freq, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (KIT F1)"
+  )
+```
+
+``` {r}
+kit_f1_preds <- interaction_preds(
+    kit_f1_data |>  drop_na(),
+    kit_f1_freq
+  )
+
+kit_f1_int <- kit_f1_preds |> 
+  interaction_plot(data=kit_f1_data) +
+  labs(
+    title = "KIT F1",
+    subtitle = "Word frequency and formant values",
+    fill = "Est. (Lob 2.0)",
+    x = "Age (months)",
+    y = "Scaled log corpus frequency"
+  )
+kit_f1_int
+```
+
+
+```{r}
+#| eval: false
+kit_f1_fit <- brm(
+    F1_lob2 ~ gender + stopword + 
+      s(age_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = kit_f1_data,
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 4000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(
+  kit_f1_fit, 
+  here('models', 'kit_f1_fit_sn.rds'), 
+  compress = "gz"
+)
+```
+
+```{r}
+kit_f1_fit <- read_rds(here('models', 'kit_f1_fit_sn.rds'))
+```
+
+
+
+```{r}
+summary(kit_f1_fit)
+```
+
+
+
+```{r}
+pp_check(kit_f1_fit, ndraws = 100) +
+  labs(
+    title = "PPD check (KIT F1)"
+  ) 
+```
+
+
+```{r}
+pp_check(kit_f1_fit, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (KIT F1)"
+  )
+```
+
+Whatever is causing the bimodal distribution in our actual data is not being
+captured by the model. However, the skew is being captured reasonably well 
+(and better than the other approaches we have tried).
+
+```{r}
+pp_check(kit_f1_fit, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (KIT F1)"
+  )
+```
+
+```{r}
+kit_f1_nofreq_preds <- smooth_preds(
+    kit_f1_data,
+    kit_f1_fit
+  ) 
+
+kit_f1_smooth <- kit_f1_nofreq_preds |> 
+  smooth_plot(data = kit_f1_data) + 
+  labs(
+    title = "Model predictions KIT F1 (no freq)",
+    x = "Age (months)",
+    colour = "Gender"
+  )
+  
+
+kit_f1_smooth
+```
+
+#### F2
+
+```{r}
+kit_f2_data <- f2 |> 
+  filter(
+    vowel == "KIT"
+  ) |> 
+  droplevels() 
+
+
+summary(kit_f2_data)
+```
+
+
+```{r}
+#| eval: false
+kit_f2_freq <- brm(
+    F2_lob2 ~ gender + stopword + 
+      t2(age_s, log_childes_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = kit_f2_data|> 
+      drop_na(),
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 4000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(kit_f2_freq, here('models', 'kit_f2_freq_sn.rds'), compress = "gz")
+```
+
+
+
+```{r}
+kit_f2_freq <- read_rds(here('models', 'kit_f2_freq_sn.rds'))
+```
+
+
+
+```{r}
+summary(kit_f2_freq)
+```
+
+
+
+```{r}
+pp_check(kit_f2_freq, ndraws = 100) +
+  labs(
+    title = "PPD check (KIT F2)"
+  )
+```
+
+
+```{r}
+pp_check(kit_f2_freq, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (KIT F2)"
+  )
+```
+
+Not bad!
+
+```{r}
+pp_check(kit_f2_freq, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (KIT F2)"
+  )
+```
+
+``` {r}
+kit_f2_preds <- interaction_preds(
+    kit_f2_data |> drop_na(),
+    kit_f2_freq
+  )
+
+kit_f2_int <- kit_f2_preds |> 
+  interaction_plot(data=kit_f2_data) +
+  labs(
+    title = "KIT F2",
+    subtitle = "Word frequency and formant values",
+    fill = "Est. (Lob 2.0)",
+    x = "Age (months)",
+    y = "Scaled log corpus frequency"
+  )
+kit_f2_int
+```
+
+```{r}
+#| eval: false
+kit_f2_fit <- brm(
+    F2_lob2 ~ gender + stopword + 
+      s(age_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = kit_f2_data,
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 5000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(kit_f2_fit, here('models', 'kit_f2_fit_sn.rds'), compress = "gz")
+```
+
+```{r}
+kit_f2_fit <- read_rds(here('models', 'kit_f2_fit_sn.rds'))
+```
+
+
+
+```{r}
+summary(kit_f2_fit)
+```
+
+
+
+```{r}
+pp_check(kit_f2_fit, ndraws = 100) +
+  labs(
+    title = "PPD check (KIT F1)"
+  ) 
+```
+
+
+```{r}
+pp_check(kit_f2_fit, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (KIT F1)"
+  )
+```
+
+Whatever is causing the bimodal distribution in our actual data is not being
+captured by the model. However, the skew is being captured reasonably well 
+(and better than the other approaches we have tried).
+
+```{r}
+pp_check(kit_f2_fit, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (KIT F2)"
+  )
+```
+
+```{r}
+kit_f2_nofreq_preds <- smooth_preds(
+    kit_f2_data,
+    kit_f2_fit
+  ) 
+
+kit_f2_smooth <- kit_f2_nofreq_preds |> 
+  smooth_plot(data = kit_f2_data) + 
+  labs(
+    title = "Model predictions KIT F2 (no freq)",
+    x = "Age (months)",
+    colour = "Gender"
+  )
+  
+
+kit_f2_smooth
+```
+
+```{r}
+rm(
+  kit_f1_freq,
+  kit_f1_fit,
+  kit_f2_freq,
+  kit_f2_fit
+)
+```
+
+### [nurse]{.smallcaps}
+
+#### F1
+
+```{r}
+nurse_f1_data <- f1 |> 
+  filter(
+    vowel == "NURSE"
+  ) |> 
+  droplevels() 
+
+
+summary(nurse_f1_data)
+```
+
+```{r}
+#| eval: false
+nurse_f1_freq <- brm(
+    F1_lob2 ~ gender + stopword + 
+      t2(age_s, log_childes_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = nurse_f1_data |> 
+      drop_na(),
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 4000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(
+  nurse_f1_freq,
+  here('models', 'nurse_f1_freq_sn.rds'), 
+  compress = "gz"
+)
+```
+
+
+```{r}
+nurse_f1_freq <- read_rds(here('models', 'nurse_f1_freq_sn.rds'))
+```
+
+
+
+```{r}
+summary(nurse_f1_freq)
+```
+
+
+
+```{r}
+pp_check(nurse_f1_freq, ndraws = 100) +
+  labs(
+    title = "PPD check (NURSE F1)"
+  )
+```
+
+
+```{r}
+pp_check(nurse_f1_freq, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (NURSE F1)"
+  )
+```
+
+
+
+```{r}
+pp_check(nurse_f1_freq, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (NURSE F1)"
+  )
+```
+
+``` {r}
+nurse_f1_preds <- interaction_preds(
+    nurse_f1_data |>  drop_na(),
+    nurse_f1_freq
+  )
+
+nurse_f1_int <- nurse_f1_preds |> 
+  interaction_plot(data=nurse_f1_data) +
+  labs(
+    title = "NURSE F1",
+    subtitle = "Word frequency and formant values",
+    fill = "Est. (Lob 2.0)",
+    x = "Age (months)",
+    y = "Scaled log corpus frequency"
+  )
+nurse_f1_int
+```
+
+I wouldn't make too many inferences from this!
+
+```{r}
+#| eval: false
+nurse_f1_fit <- brm(
+    F1_lob2 ~ gender + stopword + 
+      s(age_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = nurse_f1_data,
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 3000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(nurse_f1_fit, here('models', 'nurse_f1_fit_sn.rds'), compress = "gz")
+```
+
+```{r}
+nurse_f1_fit <- read_rds(here('models', 'nurse_f1_fit_sn.rds'))
+```
+
+
+
+```{r}
+summary(nurse_f1_fit)
+```
+
+
+
+```{r}
+pp_check(nurse_f1_fit, ndraws = 100) +
+  labs(
+    title = "PPD check (NURSE F1)"
+  ) 
+```
+
+
+```{r}
+pp_check(nurse_f1_fit, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (NURSE F1)"
+  )
+```
+
+
+```{r}
+pp_check(nurse_f1_fit, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (KIT F1)"
+  )
+```
+
+```{r}
+nurse_f1_nofreq_preds <- smooth_preds(
+    nurse_f1_data,
+    nurse_f1_fit
+  ) 
+
+nurse_f1_smooth <- nurse_f1_nofreq_preds |> 
+  smooth_plot(data = nurse_f1_data) + 
+  labs(
+    title = "Model predictions NURSE F1 (no freq)",
+    x = "Age (months)",
+    colour = "Gender"
+  )
+  
+
+nurse_f1_smooth
+```
+
+#### F2
+
+```{r}
+nurse_f2_data <- f2 |> 
+  filter(
+    vowel == "NURSE"
+  ) |> 
+  droplevels() 
+
+
+summary(nurse_f2_data)
+```
+
+
+```{r}
+#| eval: false
+nurse_f2_freq <- brm(
+    F2_lob2 ~ gender + stopword + 
+      t2(age_s, log_childes_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = nurse_f2_data|> 
+      drop_na(),
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 2000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(
+  nurse_f2_freq, 
+  here('models', 'nurse_f2_freq_sn.rds'), 
+  compress = "gz"
+)
+```
+
+
+```{r}
+nurse_f2_freq <- read_rds(here('models', 'nurse_f2_freq_sn.rds'))
+```
+
+
+
+```{r}
+summary(nurse_f2_freq)
+```
+
+
+
+```{r}
+pp_check(nurse_f2_freq, ndraws = 100) +
+  labs(
+    title = "PPD check (NURSE F2)"
+  )
+```
+
+
+```{r}
+pp_check(nurse_f2_freq, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (NURSE F2)"
+  )
+```
+
+The `M` data distribution is pretty strange!
+
+```{r}
+pp_check(nurse_f2_freq, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (NURSE F2)"
+  )
+```
+
+``` {r}
+nurse_f2_preds <- interaction_preds(
+    nurse_f2_data |>  drop_na(),
+    nurse_f2_freq
+  )
+
+nurse_f2_int <- nurse_f2_preds |> 
+  interaction_plot(data=nurse_f2_data) +
+  labs(
+    title = "NURSE F2",
+    subtitle = "Word frequency and formant values",
+    fill = "Est. (Lob 2.0)",
+    x = "Age (months)",
+    y = "Scaled log corpus frequency"
+  )
+nurse_f2_int
+```
+
+
+```{r}
+#| eval: false
+nurse_f2_fit <- brm(
+    F2_lob2 ~ gender + stopword + 
+      s(age_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = nurse_f2_data,
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 4000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(nurse_f2_fit, here('models', 'nurse_f2_fit_sn.rds'), compress = "gz")
+```
+
+```{r}
+nurse_f2_fit <- read_rds(here('models', 'nurse_f2_fit_sn.rds'))
+```
+
+
+
+```{r}
+summary(nurse_f2_fit)
+```
+
+
+
+```{r}
+pp_check(nurse_f2_fit, ndraws = 100) +
+  labs(
+    title = "PPD check (NURSE F2)"
+  ) 
+```
+
+
+```{r}
+pp_check(nurse_f1_fit, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (NURSE F2)"
+  )
+```
+
+
+```{r}
+pp_check(nurse_f2_fit, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (NURSE F2)"
+  )
+```
+
+```{r}
+nurse_f2_nofreq_preds <- smooth_preds(
+    nurse_f2_data,
+    nurse_f2_fit
+  ) 
+
+nurse_f2_smooth <- nurse_f2_nofreq_preds |> 
+  smooth_plot(data = nurse_f2_data) + 
+  labs(
+    title = "Model predictions NURSE F1 (no freq)",
+    x = "Age (months)",
+    colour = "Gender"
+  )
+  
+
+nurse_f2_smooth
+```
+
+```{r}
+rm(
+  nurse_f1_freq,
+  nurse_f1_fit,
+  nurse_f2_freq,
+  nurse_f2_fit
+)
+```
+
+### [trap]{.smallcaps}
+
+#### F1
+
+```{r}
+trap_f1_data <- f1 |> 
+  filter(
+    vowel == "TRAP"
+  ) |> 
+  droplevels() 
+
+
+summary(trap_f1_data)
+```
+
+```{r}
+#| eval: false
+trap_f1_freq <- brm(
+    F1_lob2 ~ gender + stopword + 
+      t2(age_s, log_childes_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = trap_f1_data |> 
+      drop_na(),
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 2000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(trap_f1_freq, here('models', 'trap_f1_freq_sn.rds'), compress = "gz")
+```
+
+
+```{r}
+trap_f1_freq <- read_rds(here('models', 'trap_f1_freq_sn.rds'))
+```
+
+
+
+```{r}
+summary(trap_f1_freq)
+```
+
+
+
+```{r}
+pp_check(trap_f1_freq, ndraws = 100) +
+  labs(
+    title = "PPD check (TRAP F1)"
+  )
+```
+
+
+```{r}
+pp_check(trap_f1_freq, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (TRAP F1)"
+  )
+```
+
+
+
+```{r}
+pp_check(trap_f1_freq, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (TRAP F1)"
+  )
+```
+
+``` {r}
+trap_f1_preds <- interaction_preds(
+    trap_f1_data |>  drop_na(),
+    trap_f1_freq
+  )
+
+trap_f1_int <- trap_f1_preds |> 
+  interaction_plot(data=trap_f1_data) +
+  labs(
+    title = "TRAP F1",
+    subtitle = "Word frequency and formant values",
+    fill = "Est. (Lob 2.0)",
+    x = "Age (months)",
+    y = "Scaled log corpus frequency"
+  )
+trap_f1_int
+```
+
+
+```{r}
+#| eval: false
+trap_f1_fit <- brm(
+    F1_lob2 ~ gender + stopword + 
+      s(age_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = trap_f1_data,
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 3000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(trap_f1_fit, here('models', 'trap_f1_fit_sn.rds'), compress = "gz")
+```
+
+```{r}
+trap_f1_fit <- read_rds(here('models', 'trap_f1_fit_sn.rds'))
+```
+
+
+
+```{r}
+summary(trap_f1_fit)
+```
+
+
+
+```{r}
+pp_check(trap_f1_fit, ndraws = 100) +
+  labs(
+    title = "PPD check (TRAP F1)"
+  ) 
+```
+
+
+```{r}
+pp_check(trap_f1_fit, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (TRAP F1)"
+  )
+```
+
+
+```{r}
+pp_check(trap_f1_fit, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (TRAP F1)"
+  )
+```
+
+```{r}
+trap_f1_nofreq_preds <- smooth_preds(
+    trap_f1_data,
+    trap_f1_fit
+  ) 
+
+trap_f1_smooth <- trap_f1_nofreq_preds |> 
+  smooth_plot(data = trap_f1_data) + 
+  labs(
+    title = "Model predictions TRAP F1 (no freq)",
+    x = "Age (months)",
+    colour = "Gender"
+  )
+  
+
+trap_f1_smooth
+```
+
+#### F2
+
+```{r}
+trap_f2_data <- f2 |> 
+  filter(
+    vowel == "TRAP"
+  ) |> 
+  droplevels()
+
+summary(trap_f2_data)
+```
+
+
+```{r}
+#| eval: false
+trap_f2_freq <- brm(
+    F2_lob2 ~ gender + stopword + 
+      t2(age_s, log_childes_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = trap_f2_data |> 
+      drop_na(),
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 2000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(trap_f2_freq, here('models', 'trap_f2_freq_sn.rds'), compress = "gz")
+```
+
+
+```{r}
+trap_f2_freq <- read_rds(here('models', 'trap_f2_freq_sn.rds'))
+```
+
+
+
+```{r}
+summary(trap_f2_freq)
+```
+
+
+
+```{r}
+pp_check(trap_f2_freq, ndraws = 100) +
+  labs(
+    title = "PPD check (TRAP F2)"
+  )
+```
+
+
+```{r}
+pp_check(trap_f2_freq, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (TRAP F2)"
+  )
+```
+
+The `M` data distribution is pretty strange!
+
+```{r}
+pp_check(trap_f2_freq, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (TRAP F2)"
+  )
+```
+
+``` {r}
+trap_f2_preds <- interaction_preds(
+    trap_f2_data |>  drop_na(),
+    trap_f2_freq
+  )
+
+trap_f2_int <- trap_f2_preds |> 
+  interaction_plot(data=trap_f2_data) +
+  labs(
+    title = "TRAP F2",
+    subtitle = "Word frequency and formant values",
+    fill = "Est. (Lob 2.0)",
+    x = "Age (months)",
+    y = "Scaled log corpus frequency"
+  )
+trap_f2_int
+```
+
+```{r}
+#| eval: false
+trap_f2_fit <- brm(
+    F2_lob2 ~ gender + stopword + 
+      s(age_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = trap_f2_data,
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 4000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(trap_f2_fit, here('models', 'trap_f2_fit_sn.rds'), compress = "gz")
+```
+
+
+```{r}
+trap_f2_fit <- read_rds(here('models', 'trap_f2_fit_sn.rds'))
+```
+
+
+
+```{r}
+summary(trap_f2_fit)
+```
+
+
+
+```{r}
+pp_check(trap_f2_fit, ndraws = 100) +
+  labs(
+    title = "PPD check (TRAP F2)"
+  ) 
+```
+
+
+```{r}
+pp_check(trap_f2_fit, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (TRAP F2)"
+  )
+```
+
+
+```{r}
+pp_check(trap_f2_fit, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (TRAP F2)"
+  )
+```
+
+```{r}
+trap_f2_nofreq_preds <- smooth_preds(
+    trap_f2_data,
+    trap_f2_fit
+  ) 
+
+trap_f2_smooth <- trap_f2_nofreq_preds |> 
+  smooth_plot(data = trap_f2_data) + 
+  labs(
+    title = "Model predictions TRAP F2 (no freq)",
+    x = "Age (months)",
+    colour = "Gender"
+  )
+  
+
+trap_f2_smooth
+```
+
+```{r}
+rm(
+  trap_f1_freq,
+  trap_f1_fit,
+  trap_f2_freq,
+  trap_f2_fit
+)
+```
+
+### [fleece]{.smallcaps}
+
+#### F1
+
+```{r}
+fleece_f1_data <- f1 |> 
+  filter(
+    vowel == "FLEECE"
+  ) |> 
+  droplevels() 
+
+
+summary(fleece_f1_data)
+```
+
+```{r}
+#| eval: false
+fleece_f1_freq <- brm(
+    F1_lob2 ~ gender + stopword + 
+      t2(age_s, log_childes_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = fleece_f1_data|> 
+      drop_na(),
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 4000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(fleece_f1_freq, here('models', 'fleece_f1_freq_sn.rds'), compress = "gz")
+```
+
+```{r}
+fleece_f1_freq <- read_rds(here('models', 'fleece_f1_freq_sn.rds'))
+```
+
+
+
+```{r}
+summary(fleece_f1_freq)
+```
+
+
+
+```{r}
+pp_check(fleece_f1_freq, ndraws = 100) +
+  labs(
+    title = "PPD check (FLEECE F1)"
+  )
+```
+
+
+```{r}
+pp_check(fleece_f1_freq, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (FLEECE F1)"
+  )
+```
+
+
+
+```{r}
+pp_check(fleece_f1_freq, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (FLEECE F1)"
+  )
+```
+
+``` {r}
+fleece_f1_preds <- interaction_preds(
+    fleece_f1_data |>  drop_na(),
+    fleece_f1_freq
+  )
+
+fleece_f1_int <- fleece_f1_preds |> 
+  interaction_plot(data=fleece_f1_data) +
+  labs(
+    title = "FLEECE F1",
+    subtitle = "Word frequency and formant values",
+    fill = "Est. (Lob 2.0)",
+    x = "Age (months)",
+    y = "Scaled log corpus frequency"
+  )
+fleece_f1_int
+```
+
+```{r}
+#| eval: false
+fleece_f1_fit <- brm(
+    F1_lob2 ~ gender + stopword + 
+      s(age_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = fleece_f1_data,
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 3000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(fleece_f1_fit, here('models', 'fleece_f1_fit_sn.rds'), compress = "gz")
+```
+
+
+```{r}
+fleece_f1_fit <- read_rds(here('models', 'fleece_f1_fit_sn.rds'))
+```
+
+
+
+```{r}
+summary(fleece_f1_fit)
+```
+
+
+
+```{r}
+pp_check(fleece_f1_fit, ndraws = 100) +
+  labs(
+    title = "PPD check (FLEECE F1)"
+  ) 
+```
+
+
+```{r}
+pp_check(fleece_f1_fit, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (FLEECE F1)"
+  )
+```
+
+
+```{r}
+pp_check(fleece_f1_fit, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (FLEECE F1)"
+  )
+```
+
+```{r}
+fleece_f1_nofreq_preds <- smooth_preds(
+    fleece_f1_data,
+    fleece_f1_fit
+  ) 
+
+fleece_f1_smooth <- fleece_f1_nofreq_preds |> 
+  smooth_plot(data = fleece_f1_data) + 
+  labs(
+    title = "Model predictions FLEECE F1 (no freq)",
+    x = "Age (months)",
+    colour = "Gender"
+  )
+  
+
+fleece_f1_smooth
+```
+
+#### F2
+
+```{r}
+fleece_f2_data <- f2 |> 
+  filter(
+    vowel == "FLEECE"
+  ) |> 
+  droplevels() 
+
+summary(fleece_f2_data)
+```
+
+
+```{r}
+#| eval: false
+fleece_f2_freq <- brm(
+    F2_lob2 ~ gender + stopword + 
+      t2(age_s, log_childes_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = fleece_f2_data |> 
+      drop_na(),
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 4000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(
+  fleece_f2_freq, 
+  here('models', 'fleece_f2_freq_sn.rds'), 
+  compress = "gz"
+)
+```
+
+
+```{r}
+fleece_f2_freq <- read_rds(here('models', 'fleece_f2_freq_sn.rds'))
+```
+
+
+```{r}
+summary(fleece_f2_freq)
+```
+
+
+
+```{r}
+pp_check(fleece_f2_freq, ndraws = 100) +
+  labs(
+    title = "PPD check (FLEECE F2)"
+  )
+```
+
+
+```{r}
+pp_check(fleece_f2_freq, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (FLEECE F2)"
+  )
+```
+
+The `M` data distribution is pretty strange!
+
+```{r}
+pp_check(fleece_f2_freq, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (FLEECE F2)"
+  )
+```
+
+``` {r}
+fleece_f2_preds <- interaction_preds(
+    fleece_f2_data |>  drop_na(),
+    fleece_f2_freq
+  )
+
+fleece_f2_int <- fleece_f2_preds |> 
+  interaction_plot(data=fleece_f2_data) +
+  labs(
+    title = "FLEECE F2",
+    subtitle = "Word frequency and formant values",
+    fill = "Est. (Lob 2.0)",
+    x = "Age (months)",
+    y = "Scaled log corpus frequency"
+  )
+fleece_f2_int
+```
+
+
+```{r}
+#| eval: false
+fleece_f2_fit <- brm(
+    F2_lob2 ~ gender + stopword + 
+      s(age_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = fleece_f2_data,
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 4000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(
+  fleece_f2_fit, 
+  here('models', 'fleece_f2_fit_sn.rds'), 
+  compress = "gz"
+)
+```
+
+
+```{r}
+fleece_f2_fit <- read_rds(here('models', 'fleece_f2_fit_sn.rds'))
+```
+
+
+
+```{r}
+summary(fleece_f2_fit)
+```
+
+
+
+```{r}
+pp_check(fleece_f2_fit, ndraws = 100) +
+  labs(
+    title = "PPD check (FLEECE F2)"
+  ) 
+```
+
+
+```{r}
+pp_check(fleece_f2_fit, type="dens_overlay_grouped", group="gender", ndraws = 100) +
+  labs(
+    title = "PPD check (FLEECE F2)"
+  )
+```
+
+
+```{r}
+pp_check(fleece_f2_fit, type = "stat_2d", stat = c("min", "max"), ndraws = 100) +
+  labs(
+    title = "PPD check (FLEECE F2)"
+  )
+```
+
+```{r}
+fleece_f2_nofreq_preds <- smooth_preds(
+    fleece_f2_data,
+    fleece_f2_fit
+  ) 
+
+fleece_f2_smooth <- fleece_f2_nofreq_preds |> 
+  smooth_plot(data = fleece_f2_data) + 
+  labs(
+    title = "Model predictions FLEECE F2 (no freq)",
+    x = "Age (months)",
+    colour = "Gender"
+  )
+  
+fleece_f2_smooth
+```
+
+:::
+
+## Note on model fit
+
+The model of [kit]{.smallcaps} F2 without frequency reports a single 
+divergent transition after warmup. This seems to result from difficulties 
+sampling from the complex hierarchical structure in the model. In particular,
+the nesting of stressed within word leads to a very large number of levels 
+for which random intercepts are estimated.
+
+# QuakeBox models
+
+## Fit
+
+Here we fit GAMM models with similar structures to the QuakeBox (QB). Rather than
+using `brms` we use the `mgcv` package directly. The Bayesian methods for 
+fitting GAMMs used above have many advantages, but they lack the computational 
+efficiency which we require for QB. QB is _much_ larger than our preschool
+corpus. Moreover, the flexibility we took advantage of in setting our prior 
+is not necessary for the QuakeBox. Unfortunately, we cannot fit a model with
+a skew-normal response. We use a scaled-t response to capture the large tails
+in the residuals.
+
+We borrow code from another project ([Hurring et al. under review](https://github.com/nzilbb/qb_stability_public)). We modify the anonymisation
+script from that project in order to create a stopword variable. The norm in
+sharing QuakeBox data is that _words_ are anonymised. Free narratives contain
+identifying details which are absent in not in story retell data.
+
+This is a very long section of code, so we have 'folded' it by default.
+
+First we load up the data and output some token counts which we will add to the
+paper.
+```{r}
+#| code-fold: true
+QB1 <- read_rds(here('data', 'QB1.rds'))
+
+# Check age factor is in the right order.
+QB1$age |> factor() |> levels()
+# [1] "18-25" "26-35" "36-45" "46-55" "56-65" "66-75" "76-85" "85+"  
+# yes
+
+# Various variable changes in order to fit a GAMM. With mgcv, it is important
+# to be explicit about whether a variable is a factor. We scale variables in 
+# order to improve model fit and ease of interpretation.
+QB1 <- QB1 %>%
+  mutate(
+    age_category_numeric = as.integer(factor(age)),
+    speaker = as.factor(speaker),
+    gender = as.factor(gender),
+    word = as.factor(word),
+    stopword = as.factor(stopword),
+    unstressed = as.factor(unstressed),
+    log_freq = log(celex_frequency + 1),
+    s_log_freq = scale(log_freq),
+    s_age_cat = scale(age_category_numeric)
+  )
+
+QB1_caregivercount <- QB1 |> 
+  filter(
+    vowel %in% c(
+      "DRESS",
+      "FLEECE",
+      "TRAP",
+      "KIT",
+      "NURSE"
+    ),
+    gender == "f",
+    age_category_numeric %in% c(1, 2)
+  ) |> 
+  mutate(
+    n = n_distinct(speaker)
+  )
+# 25461 tokens from notional caregiver generation.
+cat('Tokens from caregiver generation: ', nrow(QB1_caregivercount), '\n')
+
+QB1_oldestgeneration <- QB1 |> 
+  filter(
+    vowel %in% c(
+      "DRESS",
+      "FLEECE",
+      "TRAP",
+      "KIT",
+      "NURSE"
+    ),
+    gender == "f",
+    age_category_numeric %in% c(7, 8)
+  ) |> 
+  mutate(
+    n = n_distinct(speaker)
+  )
+# 9379 tokens from oldest generation.
+cat('Tokens from oldest generation: ', nrow(QB1_oldestgeneration), '\n')
+
+# 45 speakers in notional caregiver generation.
+cat('Caregivers: ', QB1_caregivercount$n[[1]], '\n')  
+
+# 18 speakers in oldest generation
+cat('Oldest: ', QB1_oldestgeneration$n[[1]])
+```
+
+Now we fit the models specified here uses nearly 40GB of RAM. Researchers
+with less access to computation may need to fit the models one-at-a-time rather
+than keeping all in memory at once. The very large size of these models is
+due to the complexity of the random effects structure.
+
+```{r}
+#| code-fold: true
+#| eval: false
+QB1_freq_models <- QB1 |> 
+  select(
+    -F1_50, -F2_50
+  ) |> 
+  pivot_longer(
+    cols = F1_lob2:F2_lob2,
+    names_to = "formant_type",
+    values_to = "formant_value"
+  ) %>%
+  group_by(vowel, formant_type) %>%
+  nest() %>%
+  mutate(
+    model = map(
+      data,
+      ~ bam(
+          formant_value ~ gender + stopword + 
+            te(age_category_numeric, s_log_freq, k = c(4, 10), by = gender) +
+            s(articulation_rate, k = 10) + # control vars
+            s(speaker, bs='re') + s(word, by=unstressed, bs='re'), # random effects
+          discrete = TRUE,
+          nthreads = 8, 
+          family = mgcv::scat(link ='identity'),
+          data = .x
+      )
+    )
+  )
+
+write_rds(QB1_freq_models, here('models', 'QB1_freq_models.rds'), compress="gz")
+
+# We'll remove these models from memory and reload them later. First, we need
+# to fit the models without frequency.
+rm(QB1_freq_models)
+
+QB1_models <- QB1 %>%
+  select(
+    -F1_50, -F2_50
+  ) %>%
+  pivot_longer(
+    cols = F1_lob2:F2_lob2,
+    names_to = "formant_type",
+    values_to = "formant_value"
+  ) %>%
+  group_by(vowel, formant_type) %>%
+  nest() %>%
+  mutate(
+    model = map(
+      data,
+      ~ bam(
+        formant_value ~ gender + stopword + 
+            s(age_category_numeric, k = 4, by = gender) +
+            s(articulation_rate, k = 10) + # control vars
+            s(speaker, bs='re') + s(word, by=unstressed, bs='re'), # random effects
+        discrete = TRUE,
+        nthreads = 8, # This value is too high for most situations.
+        family = mgcv::scat(link ='identity'),
+        data = .x
+      )
+    )
+  )
+
+write_rds(QB1_models, here('models', 'QB1_models.rds'), compress = "gz")
+```
+
+For the models without frequency we'll also generate summaries and extract
+p-values for comparison with previous results.
+```{r}
+#| eval: false
+#| code-fold: true
+QB1_models <- read_rds(here('models', 'QB1_models.rds'))
+
+
+QB1_models <- QB1_models |> 
+  mutate(
+    model_smooth_pvs = map(
+      model,
+      ~ summary(.x, re.test = FALSE)$s.pv
+    ),
+    genderF_smooth_pv = map_dbl(
+      model_smooth_pvs,
+      ~ .x[[1]]
+    ),
+    genderM_smooth_pv = map_dbl(
+      model_smooth_pvs,
+      ~ .x[[2]]
+    )
+  )
+
+write_rds(QB1_models, here('models', 'QN1_models.rds'), compress = "gz")
+
+QB1_models |> 
+  filter(vowel %in% short_front) |> 
+  select(vowel, formant_type, contains('smooth_pv'))
+```
+
+
+## Generate predictions and plot
+
+For these plots, we use the models without word frequency.
+
+```{r}
+#| message: false
+#| eval: false
+#| code-fold: true
+QB1_models <- read_rds(here('models', 'QB1_models.rds'))
+
+caregiver_preds <- function(model) {
+  get_predictions(
+    model,
+    cond = list(
+      gender = "f",
+      age_category_numeric = c(1,2),
+      stopword = FALSE,
+      unstressed = FALSE
+    )
+  )
+}
+
+oldest_preds <- function(model) {
+  get_predictions(
+    model,
+    cond = list(
+      Gender = c("f"),
+      age_category_numeric = c(7, 8),
+      stopword = FALSE,
+      unstressed = FALSE
+    )
+  )
+}
+
+QB1_models <- QB1_models |> 
+  mutate(
+    cg_pred = map(model, caregiver_preds),
+    oldest_pred = map(model, oldest_preds)
+  )
+
+preds <- QB1_models |> 
+  select(vowel, formant_type, cg_pred, oldest_pred) |> 
+  pivot_longer(
+    cols = c("cg_pred", "oldest_pred"),
+    names_to = "prediction_type",
+    values_to = "pred_value"
+  ) |> 
+  unnest(pred_value)
+
+write_rds(preds, here('data', 'QB1_cg_old_preds.rds'))
+```
+
+``` {r}
+preds <- read_rds(here('data', 'QB1_cg_old_preds.rds'))
+
+plot_preds <- preds |> 
+  group_by(vowel, formant_type, gender, prediction_type) |> 
+  summarise(
+    mean_formant_value = mean(fit)
+  ) |> 
+  pivot_wider(
+    names_from = formant_type, values_from = mean_formant_value
+  )
+
+plot_preds |> 
+  filter(
+    vowel %in% c("DRESS", "FLEECE", "NURSE", "TRAP", "KIT")
+  ) |> 
+  ggplot(
+    aes(
+      x = F2_lob2,
+      y = F1_lob2,
+      colour = vowel,
+      shape = prediction_type
+    )
+  ) +
+  geom_point() +
+  scale_x_reverse() +
+  scale_y_reverse() +
+  facet_wrap(vars(gender))
+```
+
+This is about what we would expect for our reference values.
+
+We plot change over time, again borrowing code from Hurring et al. (Under Review). We restrict the
+vowels to the extended front vowel shift.
+
+```{r}
+#| eval: false
+to_predict <- list(
+  age_category_numeric = seq(from=1, to=7, by=1), # All age categories.
+  gender = c("m", "f"),
+  stopword = FALSE,
+  unstressed = FALSE # NB: this isn't actually doing anything as random effects
+  # are cancelled by get_predictions.
+) 
+
+QB1_preds <- QB1_models %>%
+  mutate(
+    prediction = map(
+      model,
+      ~ get_predictions(model = .x, cond = to_predict, print.summary = FALSE)
+    )
+  ) %>%
+  select(
+    vowel, formant_type, prediction
+  ) %>%
+  unnest(prediction) %>%
+  # This step is important. It ensures that, when we plot,
+  # arrows go from oldest to youngest speakers.
+  arrange(
+    desc(age_category_numeric)
+  )
+
+write_rds(QB1_preds, here('data', 'QB1_preds.rds'))
+```
+
+``` {r}
+QB1_preds <- read_rds(here('data', 'QB1_preds.rds'))
+
+QB1_preds <- QB1_preds %>%
+  select(
+    -articulation_rate,
+  ) %>%
+  pivot_wider( # Pivot
+    names_from = formant_type,
+    values_from = c(fit, CI)
+  ) %>%
+  rename(
+    F1_lob2 = fit_F1_lob2,
+    F2_lob2 = fit_F2_lob2
+  ) %>%
+  mutate(
+    gender = if_else(gender == "m", "M", "F"),
+    gender = factor(gender, levels = c("M", "F"))
+  )
+
+# Tol colours, designed to be colour blind friendly.
+vowel_colours <- c(
+  DRESS = "#777777", # This is the 'bad data' colour for maps 
+  FLEECE = "#882E72",
+  KIT = "#7BAFDE",
+  TRAP = "#F7F056",
+  NURSE = "#E8601C"
+)
+
+# We use the following vector to reorder the vowel vector and thus control
+# the order in which vowels appear in the legend of our plots.
+vowels_order <- c(
+  "FLEECE", "DRESS", "NURSE", "KIT", "TRAP"
+)
+
+# Set up some functions for often-repeated plotting code.
+qb_mapping <- aes(
+  x = F2_lob2,
+  y = F1_lob2,
+  colour = vowel,
+  label = vowel_lab,
+  group = vowel
+)
+
+vs_layers <- function(in_plot) {
+  out_plot <- in_plot +
+    geom_path(
+      arrow = arrow(
+          ends = "last", 
+          type="closed",
+          length = unit(2, "mm")
+        ),
+      linewidth = 1
+    ) +
+    geom_point(
+      data = ~ .x %>% 
+        filter(
+          !vowel_lab == ""
+        ),
+      show.legend = FALSE,
+      size = 1.5
+    ) +
+    geom_label_repel(
+      min.segment.length = 0, seed = 42,
+      show.legend = FALSE,
+      fontface = "bold",
+      size = 10 / .pt,
+      label.padding = unit(0.2, "lines"),
+      alpha = 0.7,
+      max.overlaps = Inf
+    )
+}
+
+vs_scales <- function(in_plot) {
+  out_plot <- in_plot +
+    scale_x_reverse(expand = expansion(mult = 0.2), position = "top") +
+    scale_y_reverse(expand = expansion(mult = 0.1), position = "right") +
+    #scale_linetype_manual(values = c('FALSE' = "dotted", 'TRUE' = "solid")) +
+    #scale_linewidth_manual(values = c('FALSE' = 0.5, 'TRUE' = 1)) +
+    scale_colour_manual(values = vowel_colours_5) +
+    facet_grid(
+      cols = vars(gender)
+    )
+}
+
+vs_theme <- function(in_plot) {
+  out_plot <- in_plot + 
+    labs(
+      x = "F2 (normalised)",
+      y = "F1 (normalised)"
+    ) +
+    theme_bw() +
+    theme(
+      plot.title = element_text(face="bold"),
+      legend.position="none"
+    )
+}
+
+add_labels <- function(in_data) {
+  out_data <- in_data %>%
+    group_by(vowel, gender) %>%
+    mutate(
+      vowel_lab = if_else(
+        age_category_numeric == max(age_category_numeric),
+        vowel,
+        ""
+      )
+    ) %>% 
+    ungroup()
+}
+
+qb_plot <- function(in_data) {
+  out_plot <- in_data %>% 
+    add_labels() %>% 
+    ggplot(
+      mapping = qb_mapping
+    ) %>% 
+    vs_layers() %>% 
+    vs_scales() %>% 
+    vs_theme()
+}
+
+QB1_plot <- QB1_preds |> 
+  filter(
+    vowel %in% vowels_order
+  ) |> 
+  qb_plot()
+
+ggsave(
+  filename = here('plots', 'QB1.tiff'),
+  plot = QB1_plot,
+  width = 7,
+  height = 5,
+  dpi = 300
+)
+
+
+QB1_plot
+```
+
+These follow basically the same story as the combined plot from Hurring et al. (Figure 1 in the paper).
+There are some minor shifts. But these do not 
+affect the big picture interpretation. 
+
+Are the change over time smooths significant?
+```{r}
+#| eval: false
+#| code-fold: true
+# This block requires the previous 'eval:false' chunks in this section to have been run.
+walk(
+  QB1_models$model,
+  broom::tidy()
+)
+```
+
+
+We will further explore these models in future work.
+
+# Plots
+
+Having fit a models for each vowel, we create plots combining the model
+predictions with reference information from the commiunity and the storyteller.
+
+## Comparison plots
+
+The first set of plots combine our models _without word frequency_ from the
+preschoolers and the QuakeBox. 
+
+```{r}
+# As often above, we establish a function and then apply it to multiple models.
+# We take the raw data as an input in order to plot a 'rug' underneath the
+# smooths.
+comp_plot <- function(model_preds, qb_prediction, data) {
+  
+  mean_formant <- data |> pull(contains('_lob2')) |> mean()
+  
+  out_plot <- model_preds |> 
+    ggplot(
+      aes(
+        x = age,
+        y = .epred,
+        ymin = .epred.lower,
+        ymax = .epred.upper,
+        colour = gender
+      )
+    ) +
+    geom_ribbon(alpha=0.5, fill = "grey") +
+    geom_line(linewidth = 2) +
+    geom_hline(
+      aes(
+        yintercept = caregiver_level, 
+        linetype = label
+      ), 
+      data = qb_prediction
+    ) +
+    geom_rug(
+      aes(
+        x = age,
+        y = dummy,
+        colour = gender
+      ), 
+      sides = "b", 
+      data = data |> 
+        mutate(
+          dummy = seq(
+            mean_formant - 0.1, 
+            mean_formant + 0.1, 
+            length.out = nrow(data)
+          )
+        ), 
+      inherit.aes=FALSE, 
+      position="jitter"
+    ) +
+    scale_y_reverse() +
+    labs(
+      title = "Model predictions QB1 vs Kids",
+      x = "Age (months)",
+      y = "Normalised formant value (predicted)",
+      colour = "Gender",
+      linetype = "Reference"
+    )
+}
+```
+
+We use the reference values from out QuakeBox models derived above.
+
+```{r}
+preds <- preds |> 
+  mutate(
+    gender = str_to_upper(gender)
+  )
+
+caregivers <- preds |>
+  filter(age_category_numeric < 3, gender=="F") |> 
+  group_by(vowel, formant_type) |> 
+  summarise(
+    caregiver_level = mean(fit)
+  ) |> 
+  mutate(
+    label = "Caregiver level"
+  )
+
+oldest_generation <- preds |>
+  filter(age_category_numeric > 6, gender=="F") |> 
+  group_by(vowel, formant_type) |> 
+  summarise(
+    caregiver_level = mean(fit)
+  ) |> 
+  mutate(
+    label = "Oldest level"
+  )
+```
+
+We now apply the plot function to each of the models.
+
+```{r}
+comp_plots <- expand_grid(
+  vowel = c("DRESS", "FLEECE", "KIT", "NURSE", "TRAP"),
+  formant_type = c("F1_lob2", "F2_lob2")
+)
+
+mod_predictions = list(
+  dress_f1_preds,
+  dress_f2_nofreq_preds,
+  fleece_f1_nofreq_preds,
+  fleece_f2_nofreq_preds,
+  kit_f1_nofreq_preds,
+  kit_f2_nofreq_preds,
+  nurse_f1_nofreq_preds,
+  nurse_f2_nofreq_preds,
+  trap_f1_nofreq_preds,
+  trap_f2_nofreq_preds
+)
+
+mod_data = list(
+  dress_f1_data,
+  dress_f2_data,
+  fleece_f1_data,
+  fleece_f2_data,
+  kit_f1_data,
+  kit_f2_data,
+  nurse_f1_data,
+  nurse_f2_data,
+  trap_f1_data,
+  trap_f2_data
+)
+
+comp_plots <- comp_plots |> 
+  mutate(
+    predictions = mod_predictions,
+    data = mod_data
+  )
+
+comp_plots <- comp_plots |>
+  mutate(
+    plot = pmap(
+      list(vowel, formant_type, predictions, data),
+      \(x, y, z, dat) {
+        comp_plot(
+          z |> 
+            filter(
+              between(age, 47, 62)
+            ),
+          caregivers |> 
+            filter(
+              vowel == x,
+              formant_type == y
+            ),
+          data = dat
+        ) +
+          labs(
+            title = paste0(x, " ", y)
+          )
+      }
+    )
+  )
+```
+
+
+```{r}
+#| lightbox:
+#|   group: comp-plots
+#| cache: true
+#| layout-ncol: 2
+walk(
+  comp_plots$plot,
+  print
+)
+```
+
+
+We output a figure for the paper here selecting [fleece]{.smallcaps} F1,
+[dress]{.smallcaps} F1, [kit]{.smallcaps} F1 and F2.
+
+```{r}
+plot_1 <- comp_plots |> 
+  filter(
+    vowel == "FLEECE",
+    formant_type == "F1_lob2"
+  ) |> 
+  pull(plot) |> 
+  pluck(1)
+
+plot_2 <- comp_plots |> 
+  filter(
+    vowel == "DRESS",
+    formant_type == "F1_lob2"
+  ) |> 
+  pull(plot) |> 
+  pluck(1)
+
+plot_3 <- comp_plots |> 
+  filter(
+    vowel == "KIT",
+    formant_type == "F1_lob2"
+  ) |> 
+  pull(plot) |> 
+  pluck(1)
+
+plot_4 <- comp_plots |> 
+  filter(
+    vowel == "KIT",
+    formant_type == "F2_lob2"
+  ) |> 
+  pull(plot) |> 
+  pluck(1)
+
+combined_plot <- (plot_1 + plot_2) /
+  (plot_3 + plot_4) +
+  plot_layout(guides = "collect")
+
+ggsave(
+  filename = here('plots', 'combined_smooths.tiff'),
+  plot = combined_plot,
+  width = 14,
+  height = 10,
+  dpi = 300
+)
+
+combined_plot
+```
+
+## Frequency plots
+
+It may be useful to have the frequency plots for the same collection of vowels.
+
+```{r}
+combined_freq_plot <- (dress_int + fleece_f1_int) /
+  (kit_f1_int + kit_f2_int)
+
+ggsave(
+  here('plots', 'combined_freq.tiff'),
+  plot = combined_freq_plot,
+  width = 14,
+  height = 10,
+  dpi = 300
+)
+
+combined_freq_plot
+```
+
+## Vowel space plots
+
+We now plot all the models in a vowel space diagram. For the paper, we restrict
+ourself to the span from 50 to 60 months (i.e. 4;2 to 5). This avoids edge 
+behaviour in the smooths.
+
+``` {r}
+#| fig-height: 10
+#| fig-cap: Model predictions from age 4;2 to 5 with reference points from QuakeBox corpus.
+#| code-fold: true
+model_preds <- comp_plots |> 
+  select(vowel, formant_type, predictions) |> 
+  unnest(predictions)
+
+# We widen the dataframe to get a column for F1 and for F2.
+model_widepreds <- model_preds |> 
+  select(
+    gender, formant_type, vowel, 
+    `.epred`, `.epred.lower`, `.epred.upper`,
+    `.row`, age
+  ) |> 
+  pivot_wider(
+    names_from = 'formant_type',
+    values_from = c('.epred', '.epred.lower', '.epred.upper')
+  ) |> 
+  filter(
+    between(age, 50, 60)
+  )
+
+# We use the folowinmg vector to reorder the vowel vector and thus control
+# the order in which vowel sappear in the legend of our plots.
+vowel_names = c(
+  "FLEECE", "GOOSE", "DRESS", "NURSE", "THOUGHT", "KIT", "TRAP", "LOT", "STRUT",
+  "START"
+)
+
+caregivers_label <- "Caregivers' generation (F)"
+youngest_label <- "Youngest children (4;2)"
+oldest_label <- "Oldest generation (F)"
+
+first_obs <- model_widepreds |> 
+  group_by(vowel, gender) |> 
+  slice(which.min(age)) |> 
+  ungroup() |> 
+  mutate(
+    gender = if_else(
+      gender == "M", "Male", "Female"
+    )
+  )
+
+# Data used to draw confidence intervals for youngest speakers.
+grid_obs <- first_obs |> 
+  select(vowel, gender, matches('upper|lower')) |> 
+  rename(
+    x_min = .epred.lower_F2_lob2,
+    x_max = .epred.upper_F2_lob2,
+    y_min = .epred.lower_F1_lob2,
+    y_max = .epred.upper_F1_lob2
+  ) |> 
+  mutate(
+    count = 1
+  ) |> 
+  group_by(vowel, gender) |> 
+  mutate(
+    border = cumsum(count),
+    hole = border + 1
+  ) |> 
+  select(-count) |> 
+  pivot_longer(
+    cols = matches('y_min|y_max'),
+    names_to = "y_type",
+    values_to = "F1_lob2"
+  ) |> 
+  pivot_longer(
+    cols = matches('x_min|x_max'),
+    names_to = "x_type",
+    values_to = "F2_lob2"
+  ) |> 
+  mutate(
+    border = str_c(vowel, border),
+    hole = str_c(vowel, hole),
+    # sort out order in which polygon is drawn
+    order = case_when(
+      y_type == "y_min" & x_type == "x_min" ~ 1,
+      y_type == "y_min" & x_type == "x_max" ~ 2,
+      y_type == "y_max" & x_type == "x_max" ~ 3,
+      y_type == "y_max" & x_type == "x_min" ~ 4,
+    )
+  ) |> 
+  arrange(
+    order
+  )
+
+caregiver_obs <- caregivers |>
+  pivot_wider(
+    names_from = formant_type,
+    values_from = caregiver_level
+  ) |> 
+  mutate(
+    label = caregivers_label,
+    # Little trick to get the values in both gender panes.
+    Male = 1,
+    Female = 1,
+  ) |> 
+  pivot_longer(
+    cols = c("Male", "Female"),
+    names_to = "gender",
+    values_to = "forget_me"
+  ) |> 
+  select(-forget_me)
+
+oldest_obs <- oldest_generation |>
+  pivot_wider(
+    names_from = formant_type,
+    values_from = caregiver_level
+  ) |> 
+  mutate(
+    label = oldest_label,
+    # Little trick to get the values in both gender panes.
+    Male = 1,
+    Female = 1,
+  ) |> 
+  pivot_longer(
+    cols = c("Male", "Female"),
+    names_to = "gender",
+    values_to = "forget_me"
+  ) |> 
+  select(-forget_me)
+
+reference_points <- bind_rows(
+  first_obs |> 
+    mutate(
+      label = "Youngest (4;2)"
+    ) |> 
+    rename(
+      F1_lob2 = .epred_F1_lob2,
+      F2_lob2 = .epred_F2_lob2
+    ) |> 
+    select(
+      vowel, label, F1_lob2, F2_lob2, gender
+    ), 
+  caregiver_obs |> 
+    filter(
+      vowel %in% c("DRESS", "KIT", "TRAP", "FLEECE", "NURSE")
+    ),
+  oldest_obs |> 
+    filter(
+      vowel %in% c("DRESS", "KIT", "TRAP", "FLEECE", "NURSE")
+    ),
+)
+
+out_plot <- model_widepreds |> 
+  mutate(
+    vowel = factor(vowel, levels = vowel_names),
+    gender = if_else(gender == "M", "Male", "Female")
+  ) |>
+  ggplot(
+    aes(
+      x = .epred_F2_lob2,
+      y = .epred_F1_lob2,
+      colour = vowel,
+      label = vowel,
+      group = vowel
+    )
+  ) +
+  geom_point(
+    data = reference_points, 
+    inherit.aes = FALSE,
+    mapping = aes(
+      x = F2_lob2,
+      y = F1_lob2,
+      colour = vowel,
+      shape = label,
+      size = label
+    ),
+    # show.legend = FALSE
+    size = 4
+  ) +
+  # path
+  geom_path(
+    show.legend = FALSE,
+    arrow = arrow(
+        ends = "last", 
+        type="closed",
+        length = unit(2, "mm")
+      ),
+    linetype = 1,
+    linewidth = 0.7
+  ) +
+  scale_x_reverse(expand = expansion(mult = 0.1), position = "top") +
+  scale_y_reverse(position = "right") +
+  scale_colour_manual(values = vowel_colours_5) + ####
+  scale_shape_manual(
+    values = list(
+      "Caregivers' generation (F)" = 18,
+      "Youngest (4;2)" = 20,
+      "Oldest generation (F)" = 4
+    )
+  ) + 
+  labs(
+    y = "F1 (normalised)",
+    x = "F2 (normalised)",
+    colour = "Vowel",
+    shape = "Population",
+    alpha = "Confidence\n (Youngest speakers)"
+  ) +
+  guides(
+    color = guide_legend(
+      override.aes = list(fill=NA)
+    )
+  ) +
+  theme_bw() +
+  facet_grid(cols = vars(gender))
+
+
+ggsave(
+  here('plots', 'nofreq_preds.tiff'),
+  plot = out_plot,
+  width = 7,
+  height = 5,
+  dpi = 500
+)
+
+out_plot
+```
+
+We now add the storyteller to the plot, both with points for the means for 
+each vowel and polygons for the caregivers, youngest children, and storyteller.
+
+```{r}
+#| fig-height: 10
+#| fig-cap: "Vowel space change from 47 to 63 months with predicted caregiver level."
+storyteller_means <- read_rds(here('data', 'storyteller_means.rds'))
+
+storyteller_means <- storyteller_means |> 
+  rename(
+    vowel = celex_vowel
+  ) |> 
+  mutate(
+    label = "Storyteller (M)"
+  ) |> 
+  filter(
+    vowel %in% short_front
+  )
+
+group_paths <- reference_points |> 
+  bind_rows(storyteller_means |> mutate(gender = "Female")) |>
+  filter(
+    vowel %in% c("FLEECE", "NURSE", "TRAP"),
+    label != "Oldest generation (F)",
+    gender == "Female"
+  ) |> 
+  arrange(vowel)
+
+out_plot <- model_widepreds |> 
+  mutate(
+    vowel = factor(vowel, levels = vowel_names),
+    gender = if_else(gender == "M", "Male", "Female")
+  ) |>
+  filter(
+    gender == "Female"
+  ) |> 
+  ggplot(
+    aes(
+      x = .epred_F2_lob2,
+      y = .epred_F1_lob2,
+      colour = vowel,
+      label = vowel,
+      group = vowel
+    )
+  ) +
+  geom_point(
+    data = reference_points |> filter(gender == "Female"), 
+    inherit.aes = FALSE,
+    mapping = aes(
+      x = F2_lob2,
+      y = F1_lob2,
+      colour = vowel,
+      shape = label
+    ),
+    # show.legend = FALSE
+    size = 4
+  ) +
+  # path
+  geom_path(
+    show.legend = FALSE,
+    arrow = arrow(
+        ends = "last", 
+        type="closed",
+        length = unit(2, "mm")
+      ),
+    linetype = 1,
+    linewidth = 0.7
+  ) +
+  # storyteller
+  geom_point(
+    aes(
+      x = F2_lob2, 
+      y = F1_lob2,
+      shape = label
+    ),
+    data=storyteller_means,
+    size = 4
+  ) +
+  geom_polygon(
+    aes(
+      x = F2_lob2,
+      y = F1_lob2,
+      group = label,
+      linetype = label
+    ),
+    linewidth = 1,
+    colour = "black",
+    fill = "NA",
+    data = group_paths
+  ) +
+  scale_x_reverse(expand = expansion(mult = 0.1), position = "top") +
+  scale_y_reverse(position = "right") +
+  scale_colour_manual(values = vowel_colours_5) +
+  scale_shape_manual(
+    values = list(
+      "Caregivers' generation (F)" = 18, 
+      "Youngest (4;2)" = 20, 
+      "Oldest generation (F)" = 4,
+      "Storyteller (M)" = 7
+    )
+  ) +
+  labs(
+    y = "F1 (normalised)",
+    x = "F2 (normalised)",
+    colour = "Vowel",
+    shape = "Population (Points)",
+    linetype = "Population (Triangle)"
+  ) +
+  guides(
+    color = guide_legend(
+      override.aes = list(fill=NA),
+      order = 3
+    )
+  ) +
+  theme_bw()
+
+ggsave(
+  here('plots', 'nofreq_storyteller.tiff'),
+  plot = out_plot,
+  width = 7,
+  height = 5,
+  dpi = 500
+)
+
+out_plot
+```
+
+# Additional tests
+
+## Posterior predictive
+
+In what percentage of draws from out models are we higher/lower when comparing
+point X and point Y?
+
+In the paper, we emphasise a rise in [fleece]{.smallcaps} and
+[dress]{.smallcaps} and a lowering of [kit]{.smallcaps} for our female speakers
+and backing in [kit]{.smallcaps} for the male speakers.
+
+We'll quantify our certainty about these directions of change by drawing from
+the posterior predictive distribution for the relevant models and testing how
+often the formant value at 50 months and the formant value at 60 months differ
+in the direction we expect.
+
+```{r}
+directions <- tibble(
+  'model_name' = c(
+    "dress_f1_fit_sn",
+    "dress_f1_fit_sn",
+    "fleece_f1_fit_sn",
+    "fleece_f1_fit_sn",
+    "kit_f1_fit_sn",
+    "kit_f1_fit_sn",
+    "kit_f2_fit_sn"
+  ),
+  'sex' = c(
+    "M",
+    "F",
+    "M",
+    "F",
+    "M",
+    "F",
+    "M"
+  ),
+  direction = c(
+    "rise",
+    'rise',
+    "rise",
+    'rise',
+    'lower',
+    'lower',
+    'back'
+  )
+)
+
+directions <- directions |> 
+  mutate(
+    model = map(
+      model_name,
+      ~ read_rds(
+        here(
+          'models',
+          paste0(.x, '.rds')
+        )
+      )
+    )
+  )
+
+# define function to generate predictions
+generate_predictions <- function(model, sample_points, gen, stop = TRUE, seed = 101) {
+  preds <- expand_grid(
+      "age_s" = sample_points,
+      "gender" = gen
+  )
+  
+  preds <- preds |> 
+      mutate(
+        stopword = stop,
+        participant = "bob",
+        collect = "today"
+      ) |> 
+      add_epred_draws(
+        model, 
+        re_formula = NA, 
+        allow_new_levels=TRUE, 
+        ndraws=1000,
+        seed = seed
+      )
+}
+
+directions <- directions |> 
+  mutate(
+    predictions = map2(
+      model, sex,
+      ~ generate_predictions(
+        model = .x, 
+        sample_points = c(
+          ## What are 50 and 60 in age_s?
+          (50 - mean(vowels$age)) / sd(vowels$age),
+          # = -1.111994
+          (60 - mean(vowels$age)) / sd(vowels$age)
+          # = 1.431671
+        ),
+        gen = .y,
+        stop = TRUE
+      )
+    )
+  ) |> 
+  select(
+    - model
+  ) |> 
+  unnest(predictions)
+
+dir_table <- directions |> 
+  mutate(
+    age = if_else(
+      age_s < 0, "age_50", "age_60"
+    )
+  ) |> 
+  select(
+    `.draw`, `.epred`, age, gender, model_name, direction
+  ) |> 
+  pivot_wider(
+    names_from = age,
+    values_from = `.epred`
+  ) |> 
+  mutate(
+    difference = age_60 - age_50,
+    right_dir = case_when(
+      direction %in% c("rise", "back") ~ difference < 0,
+      .default = difference > 0
+    )
+  ) |> 
+  group_by(model_name, gender) |> 
+  summarise(
+    mean_50 = mean(age_50),
+    mean_60 = mean(age_60),
+    mean_diff = mean(difference),
+    perc_right = sum(right_dir) / 10
+  ) |> 
+  select(
+    model_name, gender, perc_right
+  )
+
+dir_table
+```
+
+
+## Longitudinal test
+
+We were unable to use the longitudinal nature of the data as the centre of our
+modelling strategy (due to extreme patchiness in the data). 
+
+However, we _can_ use it as a coherence check on our models. We should expect,
+if there is change in the direction we claim as the children age, that the mean
+values for a given child in subsequent recordings move in the predicted
+direction.
+
+```{r}
+# We work out the difference in mean formant value between collection points.
+collect_diffs <- vowels |> 
+  group_by(participant, collect, vowel) |> 
+  summarise(
+    n = n(),
+    mean_F1 = mean(F1_lob2),
+    mean_F2 = mean(F2_lob2),
+    gender = first(gender)
+  ) |> 
+  # take only those with at least 3 tokens for the given vowel
+  filter(n > 2) |> 
+  select(-n) |> 
+  group_by(participant, vowel) |> 
+  mutate(
+    next_F1 = lead(mean_F1),
+    next_F2 = lead(mean_F2)
+  ) |> 
+  # We have to remove rows with NA's (these will occur for the final collect for
+  # each participant, which will have NA's in the 'next_F1' and 'next_F2'
+  # columns)
+  drop_na() |> 
+  mutate(
+    F1_diff = next_F1 - mean_F1,
+    F2_diff = next_F2 - mean_F2
+  )
+
+collect_diffs |> 
+  # Select vowels we are interested in
+  filter(
+    vowel %in% c("KIT", "FLEECE", "DRESS")
+  ) |> 
+    select(
+    vowel, gender, F1_diff, F2_diff
+  ) |> 
+  pivot_longer(
+    cols = c("F1_diff", "F2_diff"),
+    names_to = "formant_type",
+    values_to = "formant_difference"
+  ) |> 
+  group_by(
+    vowel, formant_type, gender
+  ) |> 
+  mutate(
+    # n gives the number of collection point changes so we can determine a 
+    # proportion
+    n = n(),
+    # right dir - for KIT F1, we expect an _increase_ in formant values.
+    # Otherwise, we expect a decrease (i.e., rising for the female children
+    # and backing for the male speakers)
+    right_dir = case_when(
+      formant_type == "F1_diff" & vowel %in% c("FLEECE", "DRESS") ~
+        formant_difference < 0,
+      formant_type == "F1_diff" & vowel == "KIT" ~ 
+        formant_difference > 0,
+      formant_type == "F2_diff" & vowel == "KIT" & gender == "M" ~
+        formant_difference < 0,
+      .default = NA_real_
+    )
+  ) |> 
+  summarise(
+    formant_difference = first(formant_difference),
+    perc = round(sum(right_dir) / first(n), digits = 3) * 100
+  )
+```
+
+We expect these values to be messy, as they can be shifted by features which are
+modelled for. In around 70% of cases, [dress]{.smallcaps} moves in the expected
+direction (i.e. rising in the vowel space), in around 56% of times
+[kit]{.smallcaps} moves in the expected direction for female children (i.e.
+lowers in the vowel space) and 50% of times for male children (i.e. backing in
+the vowel space). FLEECE moves in the expected direction in only 40% of cases
+(i.e. rising in the vowel space).
+
+# Non-imputed analysis
+
+We now model with the non-imputed version of Lobanov 2.0. The point of this is
+to get some indication that the imputation of values carried out as part of
+our normalisation process did not bias our results.
+
+We will fit models for F1 and without word frequency and determine if they are
+broadly consistent with the results we have reported.
+
+```{r}
+f1 <- vowels |>
+  filter(!F1_outlier) |> 
+  select(
+    participant, collect, age_s, gender, word, vowel, stressed, stopword, 
+    F1_sub, log_childes_s, age
+  ) |> 
+  mutate(
+    gender = as.factor(gender),
+    word = as.factor(word)
+  )
+```
+
+```{r}
+dress_f1_data <- f1 |> 
+  filter(
+    vowel == "DRESS"
+  ) |> 
+  droplevels() |> 
+  filter(
+    !is.na(F1_sub)
+  )
+```
+
+``` {r}
+#| eval: false
+dress_f1_fit_sub <- brm(
+    F1_sub ~ gender + stopword + 
+      s(age_s, by=gender, k = 5) +
+      (1 | word/stressed) +
+      (1 | participant/collect),
+    data = dress_f1_data,
+    family = skew_normal(),
+    prior = c(
+      prior(normal(0, 4), class = "alpha"),
+      prior(normal(0, 2), class = "Intercept"),
+      prior(normal(0, 1), class = "sd"), # 
+      prior(normal(0, 1), class = "sds"), # 0.5
+      prior(normal(0, 2), class = "b") # 1
+    ),
+    chains = 4,
+    cores = 16,
+    iter = 3000,
+    control = list(adapt_delta = 0.999),
+  )
+
+write_rds(
+  dress_f1_fit_sub, 
+  here('models', 'dress_f1_fit_sub.rds'), 
+  compress = "gz"
+)
+```
+
+```{r}
+kit_f1_data <- f1 |> 
+  filter(
+    vowel == "KIT"
+  ) |> 
+  droplevels() |> 
+  filter(
+    !is.na(F1_sub)
+  )
+```
+
+``` {r}
+#| eval: false
+kit_f1_fit_sub <- brm(
+  F1_sub ~ gender + stopword + 
+    s(age_s, by=gender, k = 5) +
+    (1 | word/stressed) +
+    (1 | participant/collect),
+  data = kit_f1_data,
+  family = skew_normal(),
+  prior = c(
+    prior(normal(0, 4), class = "alpha"),
+    prior(normal(0, 2), class = "Intercept"),
+    prior(normal(0, 1), class = "sd"), # 
+    prior(normal(0, 1), class = "sds"), # 0.5
+    prior(normal(0, 2), class = "b") # 1
+  ),
+  chains = 4,
+  cores = 16,
+  iter = 4000,
+  control = list(adapt_delta = 0.999),
+)
+
+write_rds(kit_f1_fit_sub, here('models', 'kit_f1_fit_sub.rds'), compress = "gz")
+```
+
+```{r}
+nurse_f1_data <- f1 |> 
+  filter(
+    vowel == "NURSE"
+  ) |> 
+  droplevels() |> 
+  filter(
+    !is.na(F1_sub)
+  )
+```
+
+There are zero observations here.
+
+```{r}
+fleece_f1_data <- f1 |> 
+  filter(
+    vowel == "FLEECE"
+  ) |> 
+  droplevels() |> 
+  filter(
+    !is.na(F1_sub)
+  )
+```
+
+``` {r}
+#| eval: false 
+fleece_f1_fit_sub <- brm(
+  F1_sub ~ gender + stopword + 
+    s(age_s, by=gender, k = 5) +
+    (1 | word/stressed) +
+    (1 | participant/collect),
+  data = fleece_f1_data,
+  family = skew_normal(),
+  prior = c(
+    prior(normal(0, 4), class = "alpha"),
+    prior(normal(0, 2), class = "Intercept"),
+    prior(normal(0, 1), class = "sd"), # 
+    prior(normal(0, 1), class = "sds"), # 0.5
+    prior(normal(0, 2), class = "b") # 1
+  ),
+  chains = 4,
+  cores = 16,
+  iter = 4000,
+  control = list(adapt_delta = 0.999),
+)
+
+write_rds(
+  fleece_f1_fit_sub, 
+  here('models', 'fleece_f1_fit_sub.rds'), 
+  compress = "gz"
+)
+```
+
+We will look at the 'comparison plots' for these. This requires a small change
+to the `comp_plots` function (folded below).
+```{r}
+#| code-fold: true
+comp_plot <- function(model_preds, qb_prediction, data) {
+  
+  mean_formant <- data |> pull(contains('_sub')) |> mean()
+  
+  out_plot <- model_preds |> 
+    ggplot(
+      aes(
+        x = age,
+        y = .epred,
+        ymin = .epred.lower,
+        ymax = .epred.upper,
+        colour = gender
+      )
+    ) +
+    geom_ribbon(alpha=0.5, fill = "grey") +
+    geom_line(linewidth = 2) +
+    geom_hline(
+      aes(
+        yintercept = caregiver_level, 
+        linetype = label
+      ), 
+      data = qb_prediction
+    ) +
+    geom_rug(
+      aes(
+        x = age,
+        y = dummy,
+        colour = gender
+      ), 
+      sides = "b", 
+      data = data |> 
+        mutate(
+          dummy = seq(
+            mean_formant - 0.1, 
+            mean_formant + 0.1, 
+            length.out = nrow(data)
+          )
+        ), 
+      inherit.aes=FALSE, 
+      position="jitter"
+    ) +
+    scale_y_reverse() +
+    labs(
+      title = "Model predictions QB1 vs Kids",
+      x = "Age (months)",
+      y = "Normalised formant value (predicted)",
+      colour = "Gender",
+      linetype = "Reference"
+    )
+}
+```
+
+
+```{r}
+dress_f1_fit_sub <- read_rds(here('models', 'dress_f1_fit_sub.rds'))
+fleece_f1_fit_sub <- read_rds(here('models', 'fleece_f1_fit_sub.rds'))
+kit_f1_fit_sub <- read_rds(here('models', 'kit_f1_fit_sub.rds'))
+
+comp_plots <- tibble(
+  vowel = c("DRESS", "FLEECE", "KIT"),
+  formant_type = "F1_lob2",
+  data = list(
+      dress_f1_data,
+      fleece_f1_data,
+      kit_f1_data
+  ),
+  model = list(
+    dress_f1_fit_sub,
+    fleece_f1_fit_sub,
+    kit_f1_fit_sub
+  )
+)
+
+comp_plots <- comp_plots |> 
+  mutate(
+    predictions = map2(data, model, smooth_preds)
+  )
+
+comp_plot(comp_plots$predictions[[1]], caregivers, comp_plots$data[[1]])
+
+comp_plots <- comp_plots |>
+  mutate(
+    plot = pmap(
+      list(vowel, formant_type, predictions, data),
+      \(x, y, z, dat) {
+        comp_plot(
+          z |> 
+            filter(
+              between(age, 47, 62)
+            ),
+          caregivers |> 
+            filter(
+              vowel == x,
+              formant_type == y
+            ),
+          data = dat
+        ) +
+          labs(
+            title = paste0(x, " ", y)
+          )
+      }
+    )
+  )
+```
+
+
+```{r}
+#| lightbox:
+#|   group: comp-plots
+#| cache: true
+#| layout-ncol: 2
+walk(
+  comp_plots$plot,
+  print
+)
+```
+
+These models are consistent with the previous ones for [dress]{.smallcaps} and
+[kit]{.smallcaps}, and consistent with the general _extremity_ of 
+[fleece]{.smallcaps}, but not the apparent rise of [fleece]{.smallcaps} over 
+time in the vowel space.
+
+# References {-}
+
+```{r}
+#| echo: false
+grateful::nocite_references(
+  grateful::cite_packages(
+    output = "citekeys", 
+    out.dir = here(), 
+    errors="ignored"
+  )
+)
+```
+
+::: refs
+
+:::
+
