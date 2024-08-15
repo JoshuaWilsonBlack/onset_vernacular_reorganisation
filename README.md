@@ -26,8 +26,8 @@ The main entry point to this project is the OSF.io page at <https://osf.io/cz3jt
 
 The simplest way to use this material is to view the supplementary files using your web browser. The benefit of this is that you can easily see the commentary and the code and do not have to run it yourself (which takes a long time). The disadvantage is, correspondingly, that you cannot step through each step in your own R session or see what happens if you modify the code. The web versions of the supplementary materials are available at:
 
-1. [Filtering and Formant Tracking](https://nzilbb.github.io/onset_vernacular_organisation/markdown/SM1_formants.html)
-2. [Modelling](https://nzilbb.github.io/onset_vernacular_organisation/markdown/SM2_modelling.html)
+1. [Filtering and Formant Tracking](https://nzilbb.github.io/onset_vernacular_reorganisation/markdown/SM1_formants.html)
+2. [Modelling](https://nzilbb.github.io/onset_vernacular_reorganisation/markdown/SM2_modelling.html)
 
 This repository (the GitHub repository) provides access to the majority of the
 code and data for the project. To fully retrace our steps, you will also need:
