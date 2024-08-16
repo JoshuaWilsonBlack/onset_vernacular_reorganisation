@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 <meta name="author" content="[Anonymised]">
-<meta name="dcterms.date" content="2024-08-15">
+<meta name="dcterms.date" content="2024-08-16">
 
 <title>SM2: Modelling</title>
 <style>
@@ -147,7 +147,7 @@ window.Quarto = {
       <div>
       <div class="quarto-title-meta-heading">Published</div>
       <div class="quarto-title-meta-contents">
-        <p class="date">15 August 2024</p>
+        <p class="date">16 August 2024</p>
       </div>
     </div>
     
@@ -628,7 +628,7 @@ Note
 <span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>  QB1_mean_plot</span>
 <span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a><span class="fu">ggsave</span>(</span>
-<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">here</span>(<span class="st">'plots'</span>, <span class="st">'normalised_vowel_spaces.tiff'</span>),</span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">here</span>(<span class="st">'plots'</span>, <span class="st">'figure7_normalised_vowel_spaces.tiff'</span>),</span>
 <span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">plot =</span> combined_raw_plot,</span>
 <span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">width =</span> <span class="dv">7</span>,</span>
 <span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">height =</span> <span class="dv">5</span>,</span>
@@ -902,7 +902,7 @@ Figure&nbsp;3: Skew normal distributions centred one 0, with variance parameter 
 <span id="cb23-8"><a href="#cb23-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">names_to =</span> <span class="st">"draw_index"</span>,</span>
 <span id="cb23-9"><a href="#cb23-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">values_to =</span> <span class="st">"draw_value"</span></span>
 <span id="cb23-10"><a href="#cb23-10" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span> </span>
-<span id="cb23-11"><a href="#cb23-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
+<span id="cb23-11"><a href="#cb23-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>( </span>
 <span id="cb23-12"><a href="#cb23-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">draw_index =</span> <span class="fu">as.numeric</span>(<span class="fu">str_replace</span>(draw_index, <span class="st">"..."</span>, <span class="st">""</span>))</span>
 <span id="cb23-13"><a href="#cb23-13" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
@@ -4587,9 +4587,9 @@ scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
 <section id="fit" class="level2" data-number="5.1">
 <h2 data-number="5.1" class="anchored" data-anchor-id="fit"><span class="header-section-number">5.1</span> Fit</h2>
 <p>Here we fit GAMM models with similar structures to the QuakeBox (QB). Rather than using <code>brms</code> we use the <code>mgcv</code> package directly. The Bayesian methods for fitting GAMMs used above have many advantages, but they lack the computational efficiency which we require for QB. QB is <em>much</em> larger than our preschool corpus. Moreover, the flexibility we took advantage of in setting our prior is not necessary for the QuakeBox. Unfortunately, we cannot fit a model with a skew-normal response. We use a scaled-t response to capture the large tails in the residuals.</p>
-<p>We borrow code from another project (ANONYMISED). We modify the anonymisation script from that project in order to create a stopword variable. The norm in sharing QuakeBox data is that <em>words</em> are anonymised. Free narratives contain identifying details which are absent in not in story retell data.</p>
+<p>We borrow code from another project (<a href="https://github.com/nzilbb/qb_stability_public">Hurring et al.&nbsp;under review</a>). We modify the anonymisation script from that project in order to create a stopword variable. The norm in sharing QuakeBox data is that <em>words</em> are anonymised. Free narratives contain identifying details which are absent in not in story retell data.</p>
 <p>This is a very long section of code, so we have ‘folded’ it by default.</p>
-<p>First we load up the data and get some counts which we will add to the paper.</p>
+<p>First we load up the data and output some token counts which we will add to the paper.</p>
 <div class="cell">
 <details class="code-fold">
 <summary>To view the code click here</summary>
@@ -4683,7 +4683,7 @@ scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
 <pre><code>Oldest:  10</code></pre>
 </div>
 </div>
-<p>Now we fit the models specified here uses nearly 40GB of RAM. Researchers with less access to computation may need to fit the models one-at-a-time rather than keeping all in memory at once.</p>
+<p>Now we fit the models specified here uses nearly 40GB of RAM. Researchers with less access to computation may need to fit the models one-at-a-time rather than keeping all in memory at once. The very large size of these models is due to the complexity of the random effects structure.</p>
 <div class="cell">
 <details class="code-fold">
 <summary>To view the code click here</summary>
@@ -5026,7 +5026,7 @@ scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
 <span id="cb223-126"><a href="#cb223-126" aria-hidden="true" tabindex="-1"></a>  <span class="fu">qb_plot</span>()</span>
 <span id="cb223-127"><a href="#cb223-127" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb223-128"><a href="#cb223-128" aria-hidden="true" tabindex="-1"></a><span class="fu">ggsave</span>(</span>
-<span id="cb223-129"><a href="#cb223-129" aria-hidden="true" tabindex="-1"></a>  <span class="at">filename =</span> <span class="fu">here</span>(<span class="st">'plots'</span>, <span class="st">'QB1.tiff'</span>),</span>
+<span id="cb223-129"><a href="#cb223-129" aria-hidden="true" tabindex="-1"></a>  <span class="at">filename =</span> <span class="fu">here</span>(<span class="st">'plots'</span>, <span class="st">'figure4_QB1.tiff'</span>),</span>
 <span id="cb223-130"><a href="#cb223-130" aria-hidden="true" tabindex="-1"></a>  <span class="at">plot =</span> QB1_plot,</span>
 <span id="cb223-131"><a href="#cb223-131" aria-hidden="true" tabindex="-1"></a>  <span class="at">width =</span> <span class="dv">7</span>,</span>
 <span id="cb223-132"><a href="#cb223-132" aria-hidden="true" tabindex="-1"></a>  <span class="at">height =</span> <span class="dv">5</span>,</span>
@@ -5294,7 +5294,7 @@ scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
 <span id="cb229-35"><a href="#cb229-35" aria-hidden="true" tabindex="-1"></a>  <span class="fu">plot_layout</span>(<span class="at">guides =</span> <span class="st">"collect"</span>)</span>
 <span id="cb229-36"><a href="#cb229-36" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb229-37"><a href="#cb229-37" aria-hidden="true" tabindex="-1"></a><span class="fu">ggsave</span>(</span>
-<span id="cb229-38"><a href="#cb229-38" aria-hidden="true" tabindex="-1"></a>  <span class="at">filename =</span> <span class="fu">here</span>(<span class="st">'plots'</span>, <span class="st">'combined_smooths.tiff'</span>),</span>
+<span id="cb229-38"><a href="#cb229-38" aria-hidden="true" tabindex="-1"></a>  <span class="at">filename =</span> <span class="fu">here</span>(<span class="st">'plots'</span>, <span class="st">'figure6_combined_smooths.tiff'</span>),</span>
 <span id="cb229-39"><a href="#cb229-39" aria-hidden="true" tabindex="-1"></a>  <span class="at">plot =</span> combined_plot,</span>
 <span id="cb229-40"><a href="#cb229-40" aria-hidden="true" tabindex="-1"></a>  <span class="at">width =</span> <span class="dv">14</span>,</span>
 <span id="cb229-41"><a href="#cb229-41" aria-hidden="true" tabindex="-1"></a>  <span class="at">height =</span> <span class="dv">10</span>,</span>
@@ -5548,7 +5548,7 @@ scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
 <span id="cb231-204"><a href="#cb231-204" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb231-205"><a href="#cb231-205" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb231-206"><a href="#cb231-206" aria-hidden="true" tabindex="-1"></a><span class="fu">ggsave</span>(</span>
-<span id="cb231-207"><a href="#cb231-207" aria-hidden="true" tabindex="-1"></a>  <span class="fu">here</span>(<span class="st">'plots'</span>, <span class="st">'nofreq_preds.tiff'</span>),</span>
+<span id="cb231-207"><a href="#cb231-207" aria-hidden="true" tabindex="-1"></a>  <span class="fu">here</span>(<span class="st">'plots'</span>, <span class="st">'figure5_nofreq_preds.tiff'</span>),</span>
 <span id="cb231-208"><a href="#cb231-208" aria-hidden="true" tabindex="-1"></a>  <span class="at">plot =</span> out_plot,</span>
 <span id="cb231-209"><a href="#cb231-209" aria-hidden="true" tabindex="-1"></a>  <span class="at">width =</span> <span class="dv">7</span>,</span>
 <span id="cb231-210"><a href="#cb231-210" aria-hidden="true" tabindex="-1"></a>  <span class="at">height =</span> <span class="dv">5</span>,</span>
@@ -5679,7 +5679,7 @@ scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
 <span id="cb232-109"><a href="#cb232-109" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_bw</span>()</span>
 <span id="cb232-110"><a href="#cb232-110" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb232-111"><a href="#cb232-111" aria-hidden="true" tabindex="-1"></a><span class="fu">ggsave</span>(</span>
-<span id="cb232-112"><a href="#cb232-112" aria-hidden="true" tabindex="-1"></a>  <span class="fu">here</span>(<span class="st">'plots'</span>, <span class="st">'nofreq_storyteller.tiff'</span>),</span>
+<span id="cb232-112"><a href="#cb232-112" aria-hidden="true" tabindex="-1"></a>  <span class="fu">here</span>(<span class="st">'plots'</span>, <span class="st">'figure8_nofreq_storyteller.tiff'</span>),</span>
 <span id="cb232-113"><a href="#cb232-113" aria-hidden="true" tabindex="-1"></a>  <span class="at">plot =</span> out_plot,</span>
 <span id="cb232-114"><a href="#cb232-114" aria-hidden="true" tabindex="-1"></a>  <span class="at">width =</span> <span class="dv">7</span>,</span>
 <span id="cb232-115"><a href="#cb232-115" aria-hidden="true" tabindex="-1"></a>  <span class="at">height =</span> <span class="dv">5</span>,</span>
@@ -6738,7 +6738,7 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 });
 </script>
 </div> <!-- /content -->
-<script>var lightboxQuarto = GLightbox({"selector":".lightbox","closeEffect":"zoom","descPosition":"bottom","loop":false,"openEffect":"zoom"});
+<script>var lightboxQuarto = GLightbox({"openEffect":"zoom","descPosition":"bottom","selector":".lightbox","closeEffect":"zoom","loop":false});
 (function() {
   let previousOnload = window.onload;
   window.onload = () => {

@@ -333,7 +333,7 @@ combined_raw_plot <- (mean_plot + theme(legend.position = "none")) +
   QB1_mean_plot
 
 ggsave(
-  here('plots', 'normalised_vowel_spaces.tiff'),
+  here('plots', 'figure7_normalised_vowel_spaces.tiff'),
   plot = combined_raw_plot,
   width = 7,
   height = 5,
@@ -611,7 +611,7 @@ prior_draws <- prior_draws |>
     names_to = "draw_index",
     values_to = "draw_value"
   ) |> 
-  mutate(
+  mutate( 
     draw_index = as.numeric(str_replace(draw_index, "...", ""))
   )
 ```
@@ -3096,7 +3096,7 @@ QB1_plot <- QB1_preds |>
   qb_plot()
 
 ggsave(
-  filename = here('plots', 'QB1.tiff'),
+  filename = here('plots', 'figure4_QB1.tiff'),
   plot = QB1_plot,
   width = 7,
   height = 5,
@@ -3339,7 +3339,7 @@ combined_plot <- (plot_1 + plot_2) /
   plot_layout(guides = "collect")
 
 ggsave(
-  filename = here('plots', 'combined_smooths.tiff'),
+  filename = here('plots', 'figure6_combined_smooths.tiff'),
   plot = combined_plot,
   width = 14,
   height = 10,
@@ -3584,7 +3584,7 @@ out_plot <- model_widepreds |>
 
 
 ggsave(
-  here('plots', 'nofreq_preds.tiff'),
+  here('plots', 'figure5_nofreq_preds.tiff'),
   plot = out_plot,
   width = 7,
   height = 5,
@@ -3711,7 +3711,7 @@ out_plot <- model_widepreds |>
   theme_bw()
 
 ggsave(
-  here('plots', 'nofreq_storyteller.tiff'),
+  here('plots', 'figure8_nofreq_storyteller.tiff'),
   plot = out_plot,
   width = 7,
   height = 5,
