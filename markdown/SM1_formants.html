@@ -8,7 +8,7 @@
 
 <meta name="author" content="Joshua Wilson Black">
 <meta name="author" content="Lynn Clark">
-<meta name="dcterms.date" content="2024-08-15">
+<meta name="dcterms.date" content="2024-09-06">
 
 <title>SM1: Formant tracking, preprocessing, and normalisation</title>
 <style>
@@ -176,7 +176,7 @@ window.Quarto = {
       <div>
       <div class="quarto-title-meta-heading">Published</div>
       <div class="quarto-title-meta-contents">
-        <p class="date">15 August 2024</p>
+        <p class="date">6 September 2024</p>
       </div>
     </div>
     
@@ -546,7 +546,7 @@ window.Quarto = {
 <div class="cell">
 <div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>vowels <span class="ot">&lt;-</span> <span class="fu">read_rds</span>(<span class="fu">here</span>(<span class="st">'data'</span>, <span class="st">'untracked_vowels.rds'</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
-<p>We use word frequency information derived from the <a href="https://childes.talkbank.org/">CHILDES</a> corpus. The script which extracts this information is given in the GitHub repository for the project at <code>scripts/get_childes_freq.R</code>. The script also contains a list of the corpora we use and links to their descriptions on the CHILDES website.</p>
+<p>We use word frequency information derived from the <a href="https://childes.talkbank.org/">CHILDES</a> corpus <span class="citation" data-cites="macwhinneyChildesProjectTools2000">(<a href="#ref-macwhinneyChildesProjectTools2000" role="doc-biblioref">MacWhinney 2000</a>)</span>. The script which extracts this information is given in the GitHub repository for the project at <code>scripts/get_childes_freq.R</code>. The script also contains a list of the corpora we use and links to their descriptions on the CHILDES website.<a href="#fn2" class="footnote-ref" id="fnref2" role="doc-noteref"><sup>2</sup></a></p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>childes_counts <span class="ot">&lt;-</span> <span class="fu">read_rds</span>(<span class="fu">here</span>(<span class="st">'data'</span>, <span class="st">'CHILDES_tokens.rds'</span>))</span>
 <span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a></span>
@@ -4970,7 +4970,7 @@ Barreda, Santiago. 2021. <span>‘Fast Track: Fast (Nearly) Automatic Formant-Tr
 Barreda, Santiago, and Terrance M. Nearey. 2018. <span>‘<span class="nocase">A regression approach to vowel normalization for missing and unbalanced data</span>’</span>. <em>The Journal of the Acoustical Society of America</em> 144 (1): 500–520. <a href="https://doi.org/10.1121/1.5047742">https://doi.org/10.1121/1.5047742</a>.
 </div>
 <div id="ref-fasttrackr" class="csl-entry" role="listitem">
-Barreda, Santiago, and Joey Stanley. 2024. <em><span class="nocase">fasttrackr</span>: Fast Track Integration in r</em>. <a href="https://github.com/santiagobarreda/FastTrackR">https://github.com/santiagobarreda/FastTrackR</a>.
+Barreda, Santiago, and Joey Stanley. n.d. <em><span class="nocase">fasttrackr</span>: Fast Track Integration in r</em>. <a href="https://github.com/santiagobarreda/FastTrackR">https://github.com/santiagobarreda/FastTrackR</a>.
 </div>
 <div id="ref-imager" class="csl-entry" role="listitem">
 Barthelme, Simon. 2024. <em><span class="nocase">imager</span>: Image Processing Library Based on <span>‘<span>CImg</span>’</span></em>. <a href="https://CRAN.R-project.org/package=imager">https://CRAN.R-project.org/package=imager</a>.
@@ -4996,6 +4996,9 @@ Bürkner, Paul-Christian. 2017. <span>‘<span class="nocase">brms</span>: An <s
 <div id="ref-secr" class="csl-entry" role="listitem">
 Efford, Murray. 2024. <em><span class="nocase">secr</span>: Spatially Explicit Capture-Recapture Models</em>. <a href="https://CRAN.R-project.org/package=secr">https://CRAN.R-project.org/package=secr</a>.
 </div>
+<div id="ref-fletcherNormalLanguageDevelopment1988" class="csl-entry" role="listitem">
+Fletcher, Paul, and Michael Garman. 1988. <span>‘Normal Language Development and Language Impairment: <span>Syntax</span> and Beyond’</span>. <em>Clinical Linguistics &amp; Phonetics</em> 2 (2): 97–113. <a href="https://doi.org/10.3109/02699208808985246">https://doi.org/10.3109/02699208808985246</a>.
+</div>
 <div id="ref-fromont-hay-2012-labb" class="csl-entry" role="listitem">
 Fromont. 2012. <span>‘<span>L</span>a<span>BB</span>-<span>CAT</span>: An Annotation Store’</span>. In <em>Proceedings of the Australasian Language Technology Association Workshop 2012</em>, edited by Cook, 113–17. Dunedin, New Zealand. <a href="https://aclanthology.org/U12-1015">https://aclanthology.org/U12-1015</a>.
 </div>
@@ -5007,6 +5010,12 @@ Gabry, Jonah, and Tristan Mahr. 2024. <span>‘<span class="nocase">bayesplot</s
 </div>
 <div id="ref-bayesplot2019" class="csl-entry" role="listitem">
 Gabry, Jonah, Daniel Simpson, Aki Vehtari, Michael Betancourt, and Andrew Gelman. 2019. <span>‘Visualization in Bayesian Workflow’</span>. <em>J. R. Stat. Soc. A</em> 182: 389–402. <a href="https://doi.org/10.1111/rssa.12378">https://doi.org/10.1111/rssa.12378</a>.
+</div>
+<div id="ref-garveyApproachStudyChildren1979" class="csl-entry" role="listitem">
+Garvey, Catherine. 1979. <span>‘An Approach to the Study of Children’s Role Play’</span>. <em>The Quarterly News-Letter of the Laboratory of Comparative Human Cognition</em> 12.
+</div>
+<div id="ref-gathercoleAcquisitionPresentPerfect1986" class="csl-entry" role="listitem">
+Gathercole, Virginia C. 1986. <span>‘The Acquisition of the Present Perfect: Explaining Differences in the Speech of <span>Scottish</span> and <span>American</span> Children’</span>. <em>Journal of Child Language</em> 13 (3): 537–60. <a href="https://doi.org/10.1017/S0305000900006875">https://doi.org/10.1017/S0305000900006875</a>.
 </div>
 <div id="ref-glue" class="csl-entry" role="listitem">
 Hester, Jim, and Jennifer Bryan. 2024. <em><span class="nocase">glue</span>: Interpreted String Literals</em>. <a href="https://CRAN.R-project.org/package=glue">https://CRAN.R-project.org/package=glue</a>.
@@ -5026,8 +5035,14 @@ Kay, Matthew. 2023. <em><span class="nocase">tidybayes</span>: Tidy Data and Geo
 <div id="ref-ggdist2024a" class="csl-entry" role="listitem">
 ———. 2024b. <span>‘<span class="nocase">ggdist</span>: Visualizations of Distributions and Uncertainty in the Grammar of Graphics’</span>. <em>IEEE Transactions on Visualization and Computer Graphics</em> 30 (1): 414–24. <a href="https://doi.org/10.1109/TVCG.2023.3327195">https://doi.org/10.1109/TVCG.2023.3327195</a>.
 </div>
+<div id="ref-macwhinneyChildesProjectTools2000" class="csl-entry" role="listitem">
+MacWhinney, Brian. 2000. <em>The <span>Childes Project</span>: <span>Tools</span> for <span>Analyzing Talk</span>. <span>Transcription</span> Format and Programs</em>. Psychology Press. <a href="https://books.google.com?id=pSip87DmDoYC">https://books.google.com?id=pSip87DmDoYC</a>.
+</div>
 <div id="ref-here" class="csl-entry" role="listitem">
 Müller, Kirill. 2020. <em><span class="nocase">here</span>: A Simpler Way to Find Your Files</em>. <a href="https://CRAN.R-project.org/package=here">https://CRAN.R-project.org/package=here</a>.
+</div>
+<div id="ref-newmanInputUptakeMonths2016" class="csl-entry" role="listitem">
+Newman, Rochelle S., Meredith L. Rowe, and Nan Bernstein Ratner. 2016. <span>‘Input and Uptake at 7 Months Predicts Toddler Vocabulary: The Role of Child-Directed Speech and Infant Processing Skills in Language Development’</span>. <em>Journal of Child Language</em> 43 (5): 1158–73. <a href="https://doi.org/10.1017/S0305000915000446">https://doi.org/10.1017/S0305000915000446</a>.
 </div>
 <div id="ref-ggforce" class="csl-entry" role="listitem">
 Pedersen, Thomas Lin. 2024. <em><span class="nocase">ggforce</span>: Accelerating <span>‘<span class="nocase">ggplot2</span>’</span></em>. <a href="https://CRAN.R-project.org/package=ggforce">https://CRAN.R-project.org/package=ggforce</a>.
@@ -5038,17 +5053,26 @@ Pedersen, Thomas Lin, and Fabio Crameri. 2023. <em><span class="nocase">scico</s
 <div id="ref-base" class="csl-entry" role="listitem">
 R Core Team. 2024. <em><span>R</span>: A Language and Environment for Statistical Computing</em>. Vienna, Austria: R Foundation for Statistical Computing. <a href="https://www.R-project.org/">https://www.R-project.org/</a>.
 </div>
+<div id="ref-sawyerPretendPlayImprovisation1997" class="csl-entry" role="listitem">
+Sawyer, Robert Keith. 1997. <em>Pretend <span>Play</span> as <span>Improvisation</span>: <span>Conversation</span> in the <span>Preschool Classroom</span></em>. Psychology Press. <a href="https://books.google.com?id=7C2shxS3BpUC">https://books.google.com?id=7C2shxS3BpUC</a>.
+</div>
 <div id="ref-ggrepel" class="csl-entry" role="listitem">
-Slowikowski, Kamil. 2024. <em><span class="nocase">ggrepel</span>: Automatically Position Non-Overlapping Text Labels with <span>‘<span class="nocase">ggplot2</span>’</span></em>. <a href="https://CRAN.R-project.org/package=ggrepel">https://CRAN.R-project.org/package=ggrepel</a>.
+Slowikowski, Kamil. 2024. <em><span class="nocase">ggrepel</span>: Automatically Position Non-Overlapping Text Labels with <span>‘<span class="nocase">ggplot2</span>’</span></em>. <a href="https://ggrepel.slowkow.com/">https://ggrepel.slowkow.com/</a>.
+</div>
+<div id="ref-tommerdahlReliabilityMorphologicalAnalyses2014" class="csl-entry" role="listitem">
+Tommerdahl, Jodi, and Cynthia D Kilpatrick. 2014. <span>‘The Reliability of Morphological Analyses in Language Samples’</span>. <em>Language Testing</em> 31 (1): 3–18. <a href="https://doi.org/10.1177/0265532213485570">https://doi.org/10.1177/0265532213485570</a>.
 </div>
 <div id="ref-itsadug" class="csl-entry" role="listitem">
 van Rij, Jacolien, Martijn Wieling, R. Harald Baayen, and Hedderik van Rijn. 2022. <span>‘<span class="nocase">itsadug</span>: Interpreting Time Series and Autocorrelated Data Using GAMMs’</span>.
+</div>
+<div id="ref-wellsLearningInteractionStudy1981" class="csl-entry" role="listitem">
+Wells, Gordon. 1981. <span>‘Learning Through <span>Interaction</span>: <span>The Study</span> of <span>Language Development</span>’</span>. In. <a href="https://www.semanticscholar.org/paper/Learning-through-Interaction%3A-The-Study-of-Language-Wells/1de01e39d8d3131ee4550149c5eb5576aacd5697">https://www.semanticscholar.org/paper/Learning-through-Interaction%3A-The-Study-of-Language-Wells/1de01e39d8d3131ee4550149c5eb5576aacd5697</a>.
 </div>
 <div id="ref-tidyverse" class="csl-entry" role="listitem">
 Wickham, Hadley, Mara Averick, Jennifer Bryan, Winston Chang, Lucy D’Agostino McGowan, Romain François, Garrett Grolemund, et al. 2019. <span>‘Welcome to the <span class="nocase">tidyverse</span>’</span>. <em>Journal of Open Source Software</em> 4 (43): 1686. <a href="https://doi.org/10.21105/joss.01686">https://doi.org/10.21105/joss.01686</a>.
 </div>
 <div id="ref-nzilbbvowels" class="csl-entry" role="listitem">
-Wilson Black, Joshua, and James Brand. 2024. <em><span class="nocase">nzilbb.vowels</span>: Functions and Data for Vowel Covariation Studies</em>. <a href="https://github.com/JoshuaWilsonBlack/nzilbb_vowels">https://github.com/JoshuaWilsonBlack/nzilbb_vowels</a>.
+Wilson Black, Joshua, and James Brand. n.d. <em><span class="nocase">nzilbb.vowels</span>: Functions and Data for Vowel Covariation Studies</em>. <a href="https://github.com/JoshuaWilsonBlack/nzilbb_vowels">https://github.com/JoshuaWilsonBlack/nzilbb_vowels</a>.
 </div>
 <div id="ref-mgcv2017" class="csl-entry" role="listitem">
 Wood, S. N. 2017. <em>Generalized Additive Models: An Introduction with r</em>. 2nd ed. Chapman; Hall/CRC.
@@ -5087,6 +5111,7 @@ Zhu, Hao. 2024. <em><span class="nocase">kableExtra</span>: Construct Complex Ta
 
 <ol>
 <li id="fn1"><p> The <code>nzilbb.vowels</code> package will be submitted to CRAN in the near future. Any future version on CRAN should be compatible with this code.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn2"><p> We use data from: <span class="citation" data-cites="garveyApproachStudyChildren1979 wellsLearningInteractionStudy1981 gathercoleAcquisitionPresentPerfect1986 fletcherNormalLanguageDevelopment1988 sawyerPretendPlayImprovisation1997 newmanInputUptakeMonths2016 tommerdahlReliabilityMorphologicalAnalyses2014">(<a href="#ref-garveyApproachStudyChildren1979" role="doc-biblioref">Garvey 1979</a>; <a href="#ref-wellsLearningInteractionStudy1981" role="doc-biblioref">Wells 1981</a>; <a href="#ref-gathercoleAcquisitionPresentPerfect1986" role="doc-biblioref">Gathercole 1986</a>; <a href="#ref-fletcherNormalLanguageDevelopment1988" role="doc-biblioref">Fletcher and Garman 1988</a>; <a href="#ref-sawyerPretendPlayImprovisation1997" role="doc-biblioref">Sawyer 1997</a>; <a href="#ref-newmanInputUptakeMonths2016" role="doc-biblioref">Newman, Rowe, and Bernstein Ratner 2016</a>; <a href="#ref-tommerdahlReliabilityMorphologicalAnalyses2014" role="doc-biblioref">Tommerdahl and Kilpatrick 2014</a>)</span>.<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section></div></main>
 <!-- /main column -->
@@ -5511,7 +5536,7 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 });
 </script>
 </div> <!-- /content -->
-<script>var lightboxQuarto = GLightbox({"loop":false,"closeEffect":"zoom","descPosition":"bottom","selector":".lightbox","openEffect":"zoom"});
+<script>var lightboxQuarto = GLightbox({"selector":".lightbox","loop":false,"closeEffect":"zoom","descPosition":"bottom","openEffect":"zoom"});
 (function() {
   let previousOnload = window.onload;
   window.onload = () => {

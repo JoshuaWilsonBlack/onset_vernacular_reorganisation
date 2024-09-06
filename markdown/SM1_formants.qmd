@@ -385,10 +385,12 @@ We now load the data extracted from LaBB-CAT.
 vowels <- read_rds(here('data', 'untracked_vowels.rds'))
 ```
 
-We use word frequency information derived from the [CHILDES](https://childes.talkbank.org/) corpus. The script
+We use word frequency information derived from the [CHILDES](https://childes.talkbank.org/) corpus [@macwhinneyChildesProjectTools2000]. The script
 which extracts this information is given in the GitHub repository for the
 project at `scripts/get_childes_freq.R`. The script also contains a list of the 
-corpora we use and links to their descriptions on the CHILDES website.
+corpora we use and links to their descriptions on the CHILDES website.^[
+We use data from: [@garveyApproachStudyChildren1979; @wellsLearningInteractionStudy1981; @gathercoleAcquisitionPresentPerfect1986; @fletcherNormalLanguageDevelopment1988; @sawyerPretendPlayImprovisation1997; @newmanInputUptakeMonths2016; @tommerdahlReliabilityMorphologicalAnalyses2014].
+]
 
 ```{r}
 childes_counts <- read_rds(here('data', 'CHILDES_tokens.rds'))
